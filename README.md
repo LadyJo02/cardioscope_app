@@ -73,7 +73,7 @@ To get a local copy up and running, follow these simple steps.
 ---
 ## 🧑‍💻 Authors
 
-This capstone project was developed by[cite: 6]:
+This capstone project was developed by:
 * **Genheylou Deligero Felisilda**
 * **Nicole Suerte Menorias**
 * **Kobe Marco Gamus Olaguir**
