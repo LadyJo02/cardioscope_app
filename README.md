@@ -2,9 +2,7 @@
 
 **CardioScope** is a deep learning-integrated system featuring a custom-built wireless stethoscope and a mobile application for the real-time, non-invasive detection of Mitral Valve Disease (MVD).
 
-[cite_start]This project aims to bridge the diagnostic gap in underserved regions by providing an affordable and accurate alternative to traditional auscultation and expensive echocardiograms[cite: 56, 63, 293]. [cite_start]The system is designed to classify heart sounds into four categories: **Normal**, **Mitral Regurgitation (MR)**, **Mitral Stenosis (MS)**, and **Mitral Valve Prolapse (MVP)**[cite: 305, 310].
-
-
+This project aims to bridge the diagnostic gap in underserved regions by providing an affordable and accurate alternative to traditional auscultation and expensive echocardiograms[cite: 56, 63, 293]. [cite_start]The system is designed to classify heart sounds into four categories: **Normal**, **Mitral Regurgitation (MR)**, **Mitral Stenosis (MS)**, and **Mitral Valve Prolapse (MVP)**[cite: 305, 310].
 
 ---
 ## 📋 Key Features
@@ -38,13 +36,13 @@
 ---
 ## 📱 Application Screenshots
 
-*(You can replace these placeholders with your own app screenshots)*
+*(You can replace the empty spaces with your own app screenshots)*
 
 | Onboarding | Dashboard | Recording |
 | :---: | :---: | :---: |
-|  |  |  |
+| | | |
 | **Results (Normal)** | **Results (Mitral Regurgitation)** | **Saved Reports** |
-|  |  |  |
+| | | |
 
 ---
 ## 🚀 Getting Started
