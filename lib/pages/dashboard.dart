@@ -28,50 +28,62 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   OverlayEntry _createOverlayEntry() {
-    RenderBox renderBox = context.findRenderObject() as RenderBox;
-    var size = renderBox.size;
-
     return OverlayEntry(
-      builder: (context) => Positioned(
-        top: kToolbarHeight + 8,
-        right: 16,
-        child: CompositedTransformFollower(
-          link: _layerLink,
-          offset: Offset(size.width - 150, 0),
-          child: Material(
-            color: Colors.transparent,
-            child: Card(
-              elevation: 6,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ListTile(
-                    leading:
-                        const Icon(Icons.folder, color: Color(0xFFC31C42)),
-                    title: const Text("Reports"),
-                    onTap: () {
-                      _toggleMenu();
-                      Navigator.pushNamed(context, '/reports');
-                    },
-                  ),
-                  const Divider(height: 0),
-                  ListTile(
-                    leading:
-                        const Icon(Icons.settings, color: Color(0xFFC31C42)),
-                    title: const Text("Settings"),
-                    onTap: () {
-                      _toggleMenu();
-                      Navigator.pushNamed(context, '/settings');
-                    },
-                  ),
-                ],
+      builder: (context) => Stack(
+        children: <Widget>[
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: _toggleMenu,
+              child: Container(
+                color: Colors.transparent,
               ),
             ),
           ),
-        ),
+          CompositedTransformFollower(
+            link: _layerLink,
+            showWhenUnlinked: false,
+            targetAnchor: Alignment.bottomRight,
+            followerAnchor: Alignment.topRight,
+            offset: const Offset(0, 8.0),
+            child: Material(
+              color: Colors.transparent,
+              // --- CHANGE IS HERE ---
+              child: SizedBox(
+                width: 200, // Set a specific width for the menu
+                child: Card(
+                  elevation: 6,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.folder,
+                            color: Color(0xFFC31C42)),
+                        title: const Text("Reports"),
+                        onTap: () {
+                          _toggleMenu();
+                          Navigator.pushNamed(context, '/reports');
+                        },
+                      ),
+                      const Divider(height: 0),
+                      ListTile(
+                        leading: const Icon(Icons.settings,
+                            color: Color(0xFFC31C42)),
+                        title: const Text("Settings"),
+                        onTap: () {
+                          _toggleMenu();
+                          Navigator.pushNamed(context, '/settings');
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -106,7 +118,7 @@ class _DashboardPageState extends State<DashboardPage> {
         title: const Text(
           "Dashboard",
           style: TextStyle(color: Colors.white),
-          ), 
+        ),
         backgroundColor: const Color(0xFFC31C42),
         actions: [
           CompositedTransformTarget(
@@ -171,8 +183,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: ListTile(
                     leading:
                         Icon(Icons.favorite, color: result["color"] as Color),
-                    title:
-                        Text("${result["patient"]} - ${result["status"]}"),
+                    title: Text("${result["patient"]} - ${result["status"]}"),
                     subtitle: Text(result["date"] as String),
                   ),
                 );
