@@ -1,18 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-// Import pages
+// Pages
 import 'pages/dashboard.dart';
+import 'pages/profile_setup.dart';
 import 'pages/record.dart';
 import 'pages/reports.dart';
 import 'pages/results.dart';
 import 'pages/settings.dart';
 
-void main() {
-  runApp(const CardioScopeApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final prefs = await SharedPreferences.getInstance();
+  final String? userName = prefs.getString('userName');
+
+  runApp(CardioScopeApp(userName: userName));
 }
 
 class CardioScopeApp extends StatelessWidget {
-  const CardioScopeApp({super.key});
+  final String? userName;
+  const CardioScopeApp({super.key, this.userName});
 
   @override
   Widget build(BuildContext context) {
@@ -24,10 +32,13 @@ class CardioScopeApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFFC31C42),
           primary: const Color(0xFFC31C42),
+          surface: Colors.white,
         ),
         useMaterial3: true,
       ),
-      home: const MainNavigation(),
+      home: userName == null
+          ? const ProfileSetupPage()
+          : const MainNavigation(),
       routes: {
         '/record': (context) => const RecordPage(),
         '/reports': (context) => const ReportsPage(),
@@ -49,7 +60,6 @@ class _MainNavigationState extends State<MainNavigation> {
 
   final List<Widget> _pages = const [
     DashboardPage(),
-    RecordPage(),
     ResultsPage(),
   ];
 
@@ -62,33 +72,60 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F5F5), // ✅ Matches dashboard background
       body: _pages[_selectedIndex],
-      // We wrap the BottomNavigationBar with a Container to apply a custom shadow
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white, // Or Theme.of(context).canvasColor
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 8,
-              offset: const Offset(0, -3), // Shadow position (moves it upwards)
-            ),
+
+      floatingActionButton: SizedBox(
+        width: 65,
+        height: 65,
+        child: FloatingActionButton(
+          onPressed: () {
+            Navigator.pushNamed(context, '/record');
+          },
+          backgroundColor: const Color(0xFFC31C42),
+          foregroundColor: Colors.white,
+          elevation: 6.0,
+          shape: const CircleBorder(),
+          child: const Icon(Icons.mic, size: 30),
+        ),
+      ),
+
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+
+      bottomNavigationBar: BottomAppBar(
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 8.0,
+        height: 70,
+        elevation: 10,
+        color: const Color(0xFFF5F5F5), // ✅ Same as dashboard background
+        padding: EdgeInsets.zero,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: <Widget>[
+            _buildNavItem(Icons.dashboard, 'Dashboard', 0),
+            const SizedBox(width: 40), // space for mic
+            _buildNavItem(Icons.analytics, 'Results', 1),
           ],
-        ),      
-      child: BottomNavigationBar(
-        elevation: 0, // Remove default shadow
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xFFC31C42),
-        unselectedItemColor: Colors.grey,
-        backgroundColor: Colors.white,
-        items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.dashboard), label: 'Dashboard'),
-          BottomNavigationBarItem(icon: Icon(Icons.mic), label: 'Record'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.analytics), label: 'Results'),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItem(IconData icon, String label, int index) {
+    final bool isSelected = _selectedIndex == index;
+    final Color color = isSelected ? const Color(0xFFC31C42) : Colors.grey;
+
+    return InkWell(
+      onTap: () => _onItemTapped(index),
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(icon, color: color),
+            const SizedBox(height: 4),
+            Text(label, style: TextStyle(color: color, fontSize: 12)),
           ],
         ),
       ),

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../widgets/chart_widget.dart';
-import '../widgets/custom_button.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -15,6 +15,20 @@ class _DashboardPageState extends State<DashboardPage> {
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
   bool _isMenuOpen = false;
+  String _userName = 'User';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserName();
+  }
+
+  Future<void> _loadUserName() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _userName = prefs.getString('userName') ?? 'User';
+    });
+  }
 
   void _toggleMenu() {
     if (_isMenuOpen) {
@@ -47,9 +61,8 @@ class _DashboardPageState extends State<DashboardPage> {
             offset: const Offset(0, 8.0),
             child: Material(
               color: Colors.transparent,
-              // --- CHANGE IS HERE ---
               child: SizedBox(
-                width: 200, // Set a specific width for the menu
+                width: 200,
                 child: Card(
                   elevation: 6,
                   shape: RoundedRectangleBorder(
@@ -114,6 +127,8 @@ class _DashboardPageState extends State<DashboardPage> {
     ];
 
     return Scaffold(
+      // --- FIX: SET THE BACKGROUND TO OFF-WHITE ---
+      backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text(
           "Dashboard",
@@ -135,12 +150,11 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Greeting
             Text(
-              "Hello, Joanna 👋",
+              "Hello, $_userName 👋",
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
-                    color: const Color(0xFF333333),
+                    color: const Color(0xFF33333d),
                   ),
             ),
             Text(
@@ -149,19 +163,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     color: const Color(0xFF666666),
                   ),
             ),
-            const SizedBox(height: 20),
-
-            // Start Recording Button
-            CustomButton(
-              label: "Start New Recording",
-              icon: Icons.mic,
-              onPressed: () {
-                Navigator.pushNamed(context, '/record');
-              },
-            ),
             const SizedBox(height: 24),
-
-            // Recent Results
             Text(
               "Recent Results",
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -190,8 +192,6 @@ class _DashboardPageState extends State<DashboardPage> {
               },
             ),
             const SizedBox(height: 24),
-
-            // Patient Records Shortcut
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -211,8 +211,6 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
             const SizedBox(height: 16),
-
-            // Insights Chart
             Text(
               "Insights",
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
