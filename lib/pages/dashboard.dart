@@ -64,6 +64,8 @@ class _DashboardPageState extends State<DashboardPage> {
               child: SizedBox(
                 width: 200,
                 child: Card(
+                  // --- FIX IS HERE: Set the card color to white ---
+                  color: Colors.white,
                   elevation: 6,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -127,8 +129,6 @@ class _DashboardPageState extends State<DashboardPage> {
     ];
 
     return Scaffold(
-      // --- FIX: SET THE BACKGROUND TO OFF-WHITE ---
-      backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
         title: const Text(
           "Dashboard",

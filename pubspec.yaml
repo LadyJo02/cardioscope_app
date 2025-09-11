@@ -5,18 +5,18 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0' # Loosened the SDK constraint for better compatibility
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  
+
   # Core Functionality
   shared_preferences: ^2.2.3
   sqflite: ^2.3.3
   path_provider: ^2.1.3
-  intl: ^0.19.0 # Updated to a more recent version
-  
+  intl: ^0.19.0
+
   # UI & Charts
   cupertino_icons: ^1.0.8
   fl_chart: ^0.68.0
@@ -24,7 +24,8 @@ dependencies:
   # Hardware & Permissions
   flutter_blue_plus: ^1.5.0
   permission_handler: ^11.3.0
-  audioplayers: ^5.2.1
+  flutter_sound: ^9.3.0
+  audio_waveforms: ^1.0.5
 
   # AI & Reporting
   tflite_flutter: ^0.10.4
@@ -33,7 +34,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0 # Updated to a more recent version
+  flutter_lints: ^4.0.0
 
 flutter:
   uses-material-design: true

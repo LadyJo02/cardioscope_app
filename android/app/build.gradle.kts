@@ -8,8 +8,7 @@ plugins {
 android {
     namespace = "com.example.cardioscope_app"
 
-    // 🔥 Bump to latest Android SDK versions
-    compileSdk = 34
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

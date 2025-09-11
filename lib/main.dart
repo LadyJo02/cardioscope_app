@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Pages
 import 'pages/dashboard.dart';
 import 'pages/profile_setup.dart';
 import 'pages/record.dart';
 import 'pages/reports.dart';
-import 'pages/results.dart';
 import 'pages/settings.dart';
 
 Future<void> main() async {
@@ -28,6 +26,7 @@ class CardioScopeApp extends StatelessWidget {
       title: 'CardioScope',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
+        scaffoldBackgroundColor: const Color(0xFFF5F5F5),
         primaryColor: const Color(0xFFC31C42),
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFFC31C42),
@@ -36,9 +35,7 @@ class CardioScopeApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: userName == null
-          ? const ProfileSetupPage()
-          : const MainNavigation(),
+      home: userName == null ? const ProfileSetupPage() : const MainNavigation(),
       routes: {
         '/record': (context) => const RecordPage(),
         '/reports': (context) => const ReportsPage(),
@@ -58,9 +55,10 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
 
+  // --- FIX: The "Results" tab now correctly points to the ReportsPage ---
   final List<Widget> _pages = const [
     DashboardPage(),
-    ResultsPage(),
+    ReportsPage(), 
   ];
 
   void _onItemTapped(int index) {
@@ -72,38 +70,31 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5), // ✅ Matches dashboard background
+      backgroundColor: const Color(0xFFF5F5F5),
       body: _pages[_selectedIndex],
-
-      floatingActionButton: SizedBox(
-        width: 65,
-        height: 65,
-        child: FloatingActionButton(
-          onPressed: () {
-            Navigator.pushNamed(context, '/record');
-          },
-          backgroundColor: const Color(0xFFC31C42),
-          foregroundColor: Colors.white,
-          elevation: 6.0,
-          shape: const CircleBorder(),
-          child: const Icon(Icons.mic, size: 30),
-        ),
+      floatingActionButton: FloatingActionButton.large(
+        onPressed: () {
+          Navigator.pushNamed(context, '/record');
+        },
+        backgroundColor: const Color(0xFFC31C42),
+        foregroundColor: Colors.white,
+        elevation: 8.0,
+        shape: const CircleBorder(),
+        child: const Icon(Icons.mic, size: 40),
       ),
-
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-
       bottomNavigationBar: BottomAppBar(
         shape: const CircularNotchedRectangle(),
-        notchMargin: 8.0,
+        notchMargin: 10.0,
         height: 70,
         elevation: 10,
-        color: const Color(0xFFF5F5F5), // ✅ Same as dashboard background
+        color: Colors.white,
         padding: EdgeInsets.zero,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: <Widget>[
             _buildNavItem(Icons.dashboard, 'Dashboard', 0),
-            const SizedBox(width: 40), // space for mic
+            const SizedBox(width: 80),
             _buildNavItem(Icons.analytics, 'Results', 1),
           ],
         ),
@@ -119,7 +110,7 @@ class _MainNavigationState extends State<MainNavigation> {
       onTap: () => _onItemTapped(index),
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 16.0),
+        padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 16.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
