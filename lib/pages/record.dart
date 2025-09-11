@@ -197,8 +197,7 @@ class _RecordPageState extends State<RecordPage> {
                     color: _isRecording ? Colors.white : const Color(0xFFC31C42),
                     shape: BoxShape.circle,
                     border: _isRecording ? Border.all(color: const Color(0xFFC31C42), width: 4) : null,
-                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:
-0.15), blurRadius: 8, offset: const Offset(0, 4))],
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.15), blurRadius: 8, offset: const Offset(0, 4))],
                   ),
                   child: Center(
                     child: _isProcessing
@@ -243,6 +242,7 @@ class _RecordPageState extends State<RecordPage> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFFFFFFFF),
         title: const Text("Save Recording"),
         content: TextField(controller: nameController, autofocus: true, decoration: const InputDecoration(labelText: "Patient Name")),
         actions: [

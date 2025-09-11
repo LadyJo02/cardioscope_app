@@ -56,6 +56,7 @@ class _ReportsPageState extends State<ReportsPage> {
               final date = DateTime.parse(report['recordedDate']);
 
               return Card(
+                color: const Color(0xFFFFFFFF),
                 margin: const EdgeInsets.symmetric(vertical: 6),
                 child: ListTile(
                   leading: const Icon(Icons.audiotrack_rounded, color: Color(0xFFC31C42)),

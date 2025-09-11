@@ -141,6 +141,7 @@ class _ResultsPageState extends State<ResultsPage> {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: const Color(0xFFFFFFFF),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -156,18 +157,21 @@ class _ResultsPageState extends State<ResultsPage> {
   }
 
   Widget _buildDetailRow(String label, String value, {bool isSelectable = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("$label ", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
-          Expanded(
-            child: isSelectable
-                ? SelectableText(value, textAlign: TextAlign.end)
-                : Text(value, textAlign: TextAlign.end, softWrap: true),
-          ),
-        ],
+    return Container(
+      color: const Color(0xFFFFFFFF),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("$label ", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
+            Expanded(
+              child: isSelectable
+                  ? SelectableText(value, textAlign: TextAlign.end)
+                  : Text(value, textAlign: TextAlign.end, softWrap: true),
+            ),
+          ],
+        ),
       ),
     );
   }
