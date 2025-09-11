@@ -1,12 +1,16 @@
+// lib/pages/record.dart
+
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:record/record.dart' as file_recorder;
 
 import 'results.dart';
 
@@ -18,234 +22,199 @@ class RecordPage extends StatefulWidget {
 }
 
 class _RecordPageState extends State<RecordPage> {
-  final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
-  bool _isRecorderReady = false;
+  final FlutterSoundRecorder _dataStreamer = FlutterSoundRecorder();
+  final file_recorder.AudioRecorder _fileRecorder = file_recorder.AudioRecorder();
+  StreamController<Uint8List>? _recordingDataController;
+  StreamSubscription? _dataSubscription;
+
   bool _isRecording = false;
-  bool? _hasPermissions; // null = checking, true = granted, false = denied
+  bool _isProcessing = false;
+  List<FlSpot> _spots = [];
+  double _timeCounter = 0;
+  final int _maxDataPoints = 500;
 
   Timer? _timer;
   Duration _duration = Duration.zero;
 
-  StreamSubscription? _recorderSubscription;
-  List<FlSpot> _spots = [];
-  double _timeCounter = 0;
-  final int _maxDataPoints = 200;
-
   @override
   void initState() {
     super.initState();
-    _initAndRequestPermissions();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await _dataStreamer.openRecorder();
   }
 
   @override
   void dispose() {
-    _recorderSubscription?.cancel();
-    if (_recorder.isRecording) {
-      _recorder.stopRecorder();
-    }
-    _recorder.closeRecorder();
     _timer?.cancel();
+    _dataSubscription?.cancel();
+    _recordingDataController?.close();
+    _dataStreamer.closeRecorder();
+    _fileRecorder.dispose();
     super.dispose();
   }
 
-  /// 🔹 Requests ONLY the microphone permission and initializes the recorder.
-  Future<void> _initAndRequestPermissions() async {
-    final micStatus = await Permission.microphone.request();
-
-    // We only need to check for microphone status now.
-    if (micStatus.isGranted) {
-      await _initRecorder();
-      if (mounted) {
-        setState(() {
-          _hasPermissions = true;
-        });
-      }
-    } else {
-      if (mounted) {
-        setState(() {
-          _hasPermissions = false;
-        });
-      }
-    }
-  }
-  
-  Future<void> _initRecorder() async {
-    await _recorder.openRecorder();
-    _recorder.setSubscriptionDuration(const Duration(milliseconds: 100));
-
-    _recorderSubscription = _recorder.onProgress?.listen((e) {
-      if (e.decibels != null && mounted) {
-        final double amplitude = ((e.decibels! + 60) / 60).clamp(0.0, 1.0);
-        setState(() {
-          _spots.add(FlSpot(_timeCounter, amplitude));
-          _timeCounter++;
-          if (_spots.length > _maxDataPoints) {
-            _spots = _spots.sublist(_spots.length - _maxDataPoints);
-          }
-        });
-      }
-    });
-
-    if (mounted) {
-       setState(() => _isRecorderReady = true);
-    }
-  }
-
   Future<void> _toggleRecording() async {
-    if (!_isRecorderReady) {
-      await _initAndRequestPermissions();
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
+
+    final hasPermission = await _fileRecorder.hasPermission();
+    if (!mounted) {
+      setState(() => _isProcessing = false);
+      return;
+    }
+
+    if (!hasPermission) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Microphone permission required.')));
+      setState(() => _isProcessing = false);
       return;
     }
 
     if (_isRecording) {
-      final tempPath = await _recorder.stopRecorder();
-      _stopTimer();
-      if(mounted) {
-        setState(() => _isRecording = false);
-        if (tempPath != null) {
-          _askPatientNameAndSave(tempPath);
-        }
-      }
+      await _stopRecording();
     } else {
-      if(mounted) {
-        setState(() {
-          _spots = [];
-          _timeCounter = 0;
-        });
-      }
-      // This directory does NOT require special permissions on modern Android
-      final tempDir = await getTemporaryDirectory();
-      final tempPath = '${tempDir.path}/heart_sound_temp.wav';
-      await _recorder.startRecorder(
-        toFile: tempPath,
-        codec: Codec.pcm16WAV,
-      );
-      _startTimer();
-      if(mounted) {
-        setState(() => _isRecording = true);
-      }
+      await _startRecording();
+    }
+
+    if (mounted) setState(() => _isProcessing = false);
+  }
+
+  Future<void> _startRecording() async {
+    _recordingDataController = StreamController<Uint8List>();
+    _dataSubscription = _recordingDataController!.stream.listen((data) {
+      _updateWaveform(data);
+    });
+
+    await _dataStreamer.startRecorder(
+      toStream: _recordingDataController!.sink,
+      codec: Codec.pcm16,
+    );
+
+    final tempDir = await getTemporaryDirectory();
+    final tempPath = '${tempDir.path}/temp_recording.wav';
+    await _fileRecorder.start(const file_recorder.RecordConfig(encoder: file_recorder.AudioEncoder.wav), path: tempPath);
+
+    setState(() {
+      _isRecording = true;
+      _spots = [];
+      _timeCounter = 0;
+    });
+    _startTimer();
+  }
+
+  Future<void> _stopRecording() async {
+    if (!_dataStreamer.isRecording) return;
+    await _dataStreamer.stopRecorder();
+    final path = await _fileRecorder.stop();
+    _dataSubscription?.cancel();
+    _recordingDataController?.close();
+    _stopTimer();
+
+    if (mounted) {
+      setState(() => _isRecording = false);
+      if (path != null) await _askPatientNameAndSave(path);
     }
   }
-  
+
+  void _updateWaveform(Uint8List rawData) {
+    final byteData = rawData.buffer.asByteData();
+    final samples = <double>[];
+    for (int i = 0; i < rawData.lengthInBytes; i += 2) {
+      samples.add(byteData.getInt16(i, Endian.little) / 32768.0);
+    }
+    
+    if (mounted) {
+      setState(() {
+        for (var sample in samples) {
+          _spots.add(FlSpot(_timeCounter, sample));
+          _timeCounter++;
+        }
+        while (_spots.length > _maxDataPoints) {
+          _spots.removeAt(0);
+        }
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Record Heart Sound', style: TextStyle(color: Colors.white)),
         backgroundColor: const Color(0xFFC31C42),
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       backgroundColor: const Color(0xFFF5F5F5),
       body: Center(
-        child: _buildContent(),
-      ),
-    );
-  }
-
-  Widget _buildContent() {
-    if (_hasPermissions == null) {
-      return const CircularProgressIndicator(color: Color(0xFFC31C42));
-    }
-    if (_hasPermissions == false) {
-      return _buildPermissionsDeniedUI();
-    }
-    return _buildRecordingUI();
-  }
-
-  Widget _buildRecordingUI() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        Container(
-          height: 150,
-          width: MediaQuery.of(context).size.width * 0.9,
-          padding: const EdgeInsets.all(8.0),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha:0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              )
-            ],
-          ),
-          child: LineChart(
-            LineChartData(
-              titlesData: const FlTitlesData(
-                leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-              ),
-              gridData: const FlGridData(show: false),
-              borderData: FlBorderData(show: false),
-              lineBarsData: [
-                LineChartBarData(
-                  spots: _spots,
-                  isCurved: true,
-                  color: const Color(0xFFC31C42),
-                  barWidth: 2,
-                  dotData: const FlDotData(show: false),
-                ),
-              ],
-              minY: 0,
-              maxY: 1,
-              minX: _spots.length > _maxDataPoints ? (_timeCounter - _maxDataPoints) : 0,
-              maxX: _spots.length > _maxDataPoints ? _timeCounter : _maxDataPoints.toDouble(),
-            ),
-          ),
-        ),
-        Text(_formatDuration(_duration), style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w300)),
-        Column(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            SizedBox(
-              width: 100,
-              height: 100,
-              child: FloatingActionButton(
-                onPressed: _toggleRecording,
-                backgroundColor: _isRecording ? Colors.white : const Color(0xFFC31C42),
-                foregroundColor: _isRecording ? const Color(0xFFC31C42) : Colors.white,
-                shape: const CircleBorder(),
-                elevation: 8,
-                child: Icon(_isRecording ? Icons.stop : Icons.mic, size: 50),
+            Container(
+              height: 150,
+              width: MediaQuery.of(context).size.width * 0.9,
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:
+0.05), blurRadius: 10, offset: const Offset(0, 4))],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: LineChart(
+                  LineChartData(
+                    titlesData: const FlTitlesData(show: false),
+                    gridData: const FlGridData(show: false),
+                    borderData: FlBorderData(show: false),
+                    lineBarsData: [
+                      LineChartBarData(
+                        spots: _spots,
+                        isCurved: false,
+                        color: const Color(0xFFC31C42),
+                        barWidth: 1.5,
+                        dotData: const FlDotData(show: false),
+                      ),
+                    ],
+                    minY: -1.0, maxY: 1.0,
+                    minX: _spots.isNotEmpty ? _spots.first.x : 0,
+                    maxX: _spots.isNotEmpty ? _spots.last.x : 0,
+                    lineTouchData: const LineTouchData(enabled: false),
+                  ),
+                ),
               ),
             ),
-            const SizedBox(height: 20),
+            Text(_formatDuration(_duration), style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w300)),
+            Hero(
+              tag: 'record_button_hero',
+              child: GestureDetector(
+                onTap: _toggleRecording,
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: _isRecording ? Colors.white : const Color(0xFFC31C42),
+                    shape: BoxShape.circle,
+                    border: _isRecording ? Border.all(color: const Color(0xFFC31C42), width: 4) : null,
+                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:
+0.15), blurRadius: 8, offset: const Offset(0, 4))],
+                  ),
+                  child: Center(
+                    child: _isProcessing
+                        ? const CircularProgressIndicator(color: Color(0xFFC31C42))
+                        : Icon(
+                            _isRecording ? Icons.stop_rounded : Icons.mic,
+                            color: _isRecording ? const Color(0xFFC31C42) : Colors.white,
+                            size: 40,
+                          ),
+                  ),
+                ),
+              ),
+            ),
             Text(_isRecording ? "Tap to Stop" : "Tap to Start", style: const TextStyle(fontSize: 16, color: Colors.grey)),
           ],
         ),
-      ],
-    );
-  }
-
-  Widget _buildPermissionsDeniedUI() {
-    return Padding(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, size: 80, color: Colors.grey),
-          const SizedBox(height: 20),
-          const Text('Microphone Permission Required', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-          const SizedBox(height: 10),
-          const Text(
-            'CardioScope needs access to your microphone to record heart sounds.',
-            style: TextStyle(fontSize: 16, color: Colors.black54),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 30),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.settings),
-            label: const Text('Open App Settings'),
-            onPressed: openAppSettings,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFC31C42),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -253,13 +222,10 @@ class _RecordPageState extends State<RecordPage> {
   void _startTimer() {
     _timer?.cancel();
     _duration = Duration.zero;
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) {
-        setState(() => _duration = Duration(seconds: _duration.inSeconds + 1));
-      }
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) setState(() => _duration += const Duration(seconds: 1));
     });
   }
-
   void _stopTimer() {
     _timer?.cancel();
   }
@@ -278,55 +244,46 @@ class _RecordPageState extends State<RecordPage> {
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: const Text("Save Recording"),
-        content: TextField(
-          controller: nameController,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: "Patient Name",
-            border: OutlineInputBorder(),
-          ),
-        ),
+        content: TextField(controller: nameController, autofocus: true, decoration: const InputDecoration(labelText: "Patient Name")),
         actions: [
           TextButton(onPressed: () => Navigator.of(context).pop(null), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () {
-              final name = nameController.text.trim();
-              if (name.isNotEmpty) Navigator.of(context).pop(name);
-            },
-            child: const Text("Save"),
-          ),
+          ElevatedButton(onPressed: () {
+            final name = nameController.text.trim();
+            if (name.isNotEmpty) Navigator.of(context).pop(name);
+          }, child: const Text("Save")),
         ],
       ),
     );
 
     if (patientName == null || patientName.isEmpty) {
       final tempFile = File(tempPath);
-      if (await tempFile.exists()) {
-        await tempFile.delete();
-      }
+      if (await tempFile.exists()) await tempFile.delete();
       return;
     }
 
     try {
-      final directory = await getExternalStorageDirectory();
-      if (directory == null) throw Exception("Cannot access storage");
-      
-      final storagePath = '${directory.path}/CardioScope/heart_sounds';
+      final String? selectedDirectory = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Please select a folder to save the report:');
+      if (selectedDirectory == null) {
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Save operation cancelled.')));
+        return;
+      }
+      final storagePath = '$selectedDirectory/CardioScope/heart_sounds';
       final storageDir = Directory(storagePath);
       if (!await storageDir.exists()) await storageDir.create(recursive: true);
 
-      final date = DateFormat('yyyy-MM-dd_HH-mm').format(DateTime.now());
+      final date = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final time = DateFormat('HHmmss').format(DateTime.now());
       final safeName = patientName.replaceAll(RegExp(r'\s+'), "_");
-      final newPath = "$storagePath/${safeName}_$date.wav";
+      final newFileName = "${safeName}_${date}_$time.wav";
+      final newPath = "$storagePath/$newFileName";
+
       final tempFile = File(tempPath);
       await tempFile.copy(newPath);
       await tempFile.delete();
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (context) => ResultsPage(filePath: newPath, patientName: patientName),
-        ),
+        MaterialPageRoute(builder: (context) => ResultsPage(filePath: newPath, patientName: patientName)),
       );
     } catch (e) {
       if (!mounted) return;

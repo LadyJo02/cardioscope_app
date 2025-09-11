@@ -16,16 +16,21 @@ dependencies:
   sqflite: ^2.3.3
   path_provider: ^2.1.3
   intl: ^0.19.0
+  path: ^1.9.0
+  file_picker: ^8.0.0+1           # For picking files (e.g., PDF reports)
 
   # UI & Charts
   cupertino_icons: ^1.0.8
   fl_chart: ^0.68.0
 
-  # Hardware & Permissions
+  # Hardware, Permissions & Audio
   flutter_blue_plus: ^1.5.0
-  permission_handler: ^11.3.0
-  flutter_sound: ^9.3.0
-  audio_waveforms: ^1.0.5
+  permission_handler: ^11.3.1
+  record: ^6.1.1                  # For recording with raw data access
+  just_audio: ^0.9.36             # For robust audio playback
+  audio_waveforms: ^1.0.5         # For real-time waveform visualization 
+  flutter_sound: ^9.2.13          # live stream of raw audio data for the PCG waveform
+
 
   # AI & Reporting
   tflite_flutter: ^0.10.4

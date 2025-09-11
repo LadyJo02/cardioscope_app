@@ -1,93 +1,69 @@
-// lib/pages/results.dart
+// lib/pages/report_detail.dart
 
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:cardioscope_app/database_helper.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:just_audio/just_audio.dart';
 
-class ResultsPage extends StatefulWidget {
-  final String filePath;
-  final String patientName;
+class ReportDetailPage extends StatefulWidget {
+  final Map<String, dynamic> report;
 
-  const ResultsPage({super.key, required this.filePath, required this.patientName});
+  const ReportDetailPage({super.key, required this.report});
 
   @override
-  State<ResultsPage> createState() => _ResultsPageState();
+  State<ReportDetailPage> createState() => _ReportDetailPageState();
 }
 
-class _ResultsPageState extends State<ResultsPage> {
+class _ReportDetailPageState extends State<ReportDetailPage> {
+  final AudioPlayer _player = AudioPlayer();
   Future<List<FlSpot>>? _waveformFuture;
 
   @override
   void initState() {
     super.initState();
     _waveformFuture = _loadWaveformData();
-    _saveReportToDatabase();
+    _player.setFilePath(widget.report['filePath']);
   }
-  
-  Future<void> _saveReportToDatabase() async {
-    final report = {
-      'patientName': widget.patientName,
-      'filePath': widget.filePath,
-      'recordedDate': DateTime.now().toIso8601String(),
-      'classification': 'Pending',
-      'confidence': 'N/A',
-    };
-    await DatabaseHelper.instance.createReport(report);
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
   }
 
   Future<List<FlSpot>> _loadWaveformData() async {
-    final file = File(widget.filePath);
+    final file = File(widget.report['filePath']);
     final bytes = await file.readAsBytes();
     if (bytes.lengthInBytes <= 44) return [];
     
     final pcmBytes = bytes.sublist(44);
     final byteData = ByteData.view(pcmBytes.buffer);
+
     final spots = <FlSpot>[];
-    
-    const int downsamplingFactor = 50;
-    for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsamplingFactor)) {
-      if (i + 2 <= pcmBytes.lengthInBytes) {
-        final sample = byteData.getInt16(i, Endian.little) / 32768.0;
-        spots.add(FlSpot((i / 2).toDouble(), sample));
-      }
+    for (int i = 0; i < pcmBytes.lengthInBytes; i += 2) {
+      spots.add(FlSpot((i / 2).toDouble(), byteData.getInt16(i, Endian.little) / 32768.0));
     }
     return spots;
   }
 
   @override
   Widget build(BuildContext context) {
+    final date = DateTime.parse(widget.report['recordedDate']);
     return Scaffold(
       appBar: AppBar(
-        title: Text('Analysis for ${widget.patientName}', style: const TextStyle(color: Colors.white)),
+        title: Text('Report for ${widget.report['patientName']}', style: const TextStyle(color: Colors.white)),
         backgroundColor: const Color(0xFFC31C42),
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Text(
-                'Recording Saved!',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold, color: Colors.green[800]),
-              ),
-            ),
-            const SizedBox(height: 16),
-            _buildSectionCard("Patient Details", [
-              _buildDetailRow("Name:", widget.patientName),
-              _buildDetailRow("File Location:", widget.filePath, isSelectable: true),
-              _buildDetailRow("Recorded:", DateFormat('MMMM d, yyyy HH:mm').format(DateTime.now())),
-            ]),
-            const SizedBox(height: 16),
-            _buildSectionCard("Phonocardiogram (PCG)", [
+            _buildSectionCard("Playback & Waveform", [
               SizedBox(
                 height: 150,
                 child: FutureBuilder<List<FlSpot>>(
@@ -117,26 +93,54 @@ class _ResultsPageState extends State<ResultsPage> {
                   },
                 ),
               ),
+              const SizedBox(height: 16),
+              StreamBuilder<PlayerState>(
+                stream: _player.playerStateStream,
+                builder: (context, snapshot) {
+                  final playerState = snapshot.data;
+                  final processingState = playerState?.processingState;
+                  final playing = playerState?.playing;
+                  
+                  IconData icon = Icons.play_arrow;
+                  if (playing == true) {
+                    icon = Icons.pause;
+                  } else if (processingState == ProcessingState.completed) {
+                    icon = Icons.replay;
+                  }
+
+                  return Center(
+                    child: IconButton(
+                      iconSize: 48,
+                      icon: Icon(icon, color: const Color(0xFFC31C42)),
+                      onPressed: () {
+                        if (playing == true) {
+                          _player.pause();
+                        } else if (processingState == ProcessingState.completed) {
+                          _player.seek(Duration.zero);
+                        } else {
+                          _player.play();
+                        }
+                      },
+                    ),
+                  );
+                },
+              ),
             ]),
             const SizedBox(height: 16),
-            _buildSectionCard("AI Analysis (Placeholder)", [
-              _buildDetailRow("Classification:", "Pending..."),
-              _buildDetailRow("Confidence Score:", "N/A"),
+            _buildSectionCard("Report Details", [
+              _buildDetailRow("Name:", widget.report['patientName']),
+              _buildDetailRow("File:", widget.report['filePath'].split('/').last),
+              _buildDetailRow("Recorded:", DateFormat('MMMM d, yyyy HH:mm').format(date)),
+              _buildDetailRow("Classification:", widget.report['classification'] ?? 'N/A'),
+              _buildDetailRow("Confidence:", widget.report['confidence'] ?? 'N/A'),
             ]),
-            const SizedBox(height: 80),
           ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () { /* PDF Export Logic will go here */ },
-        icon: const Icon(Icons.picture_as_pdf),
-        label: const Text("Export PDF"),
-        backgroundColor: const Color(0xFFC31C42),
-        foregroundColor: Colors.white,
       ),
     );
   }
 
+  // --- Complete Helper Methods ---
   Widget _buildSectionCard(String title, List<Widget> children) {
     return Card(
       elevation: 2,
