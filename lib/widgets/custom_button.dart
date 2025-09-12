@@ -1,4 +1,10 @@
+// lib/widgets/custom_button.dart
 import 'package:flutter/material.dart';
+
+/// Shared constants for buttons
+class ButtonConstants {
+  static const double micButtonSize = 120.0; // ✅ Mic button size used across the app
+}
 
 class CustomButton extends StatelessWidget {
   final String label;

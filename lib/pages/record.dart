@@ -1,9 +1,8 @@
-// lib/pages/record.dart
-
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cardioscope_app/widgets/custom_button.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -12,7 +11,7 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart' as file_recorder;
 
-import 'results.dart';
+import 'report_generated.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -58,6 +57,7 @@ class _RecordPageState extends State<RecordPage> {
 
   Future<void> _toggleRecording() async {
     if (_isProcessing) return;
+
     setState(() => _isProcessing = true);
 
     final hasPermission = await _fileRecorder.hasPermission();
@@ -67,7 +67,9 @@ class _RecordPageState extends State<RecordPage> {
     }
 
     if (!hasPermission) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Microphone permission required.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Microphone permission required.')),
+      );
       setState(() => _isProcessing = false);
       return;
     }
@@ -83,9 +85,7 @@ class _RecordPageState extends State<RecordPage> {
 
   Future<void> _startRecording() async {
     _recordingDataController = StreamController<Uint8List>();
-    _dataSubscription = _recordingDataController!.stream.listen((data) {
-      _updateWaveform(data);
-    });
+    _dataSubscription = _recordingDataController!.stream.listen(_updateWaveform);
 
     await _dataStreamer.startRecorder(
       toStream: _recordingDataController!.sink,
@@ -94,20 +94,27 @@ class _RecordPageState extends State<RecordPage> {
 
     final tempDir = await getTemporaryDirectory();
     final tempPath = '${tempDir.path}/temp_recording.wav';
-    await _fileRecorder.start(const file_recorder.RecordConfig(encoder: file_recorder.AudioEncoder.wav), path: tempPath);
+
+    await _fileRecorder.start(
+      const file_recorder.RecordConfig(encoder: file_recorder.AudioEncoder.wav),
+      path: tempPath,
+    );
 
     setState(() {
       _isRecording = true;
       _spots = [];
       _timeCounter = 0;
     });
+
     _startTimer();
   }
 
   Future<void> _stopRecording() async {
     if (!_dataStreamer.isRecording) return;
+
     await _dataStreamer.stopRecorder();
     final path = await _fileRecorder.stop();
+
     _dataSubscription?.cancel();
     _recordingDataController?.close();
     _stopTimer();
@@ -121,15 +128,16 @@ class _RecordPageState extends State<RecordPage> {
   void _updateWaveform(Uint8List rawData) {
     final byteData = rawData.buffer.asByteData();
     final samples = <double>[];
+
     for (int i = 0; i < rawData.lengthInBytes; i += 2) {
       samples.add(byteData.getInt16(i, Endian.little) / 32768.0);
     }
-    
+
     if (mounted) {
       setState(() {
         for (var sample in samples) {
           _spots.add(FlSpot(_timeCounter, sample));
-          _timeCounter++;
+          _timeCounter += 1;
         }
         while (_spots.length > _maxDataPoints) {
           _spots.removeAt(0);
@@ -158,8 +166,13 @@ class _RecordPageState extends State<RecordPage> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
-                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:
-0.05), blurRadius: 10, offset: const Offset(0, 4))],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(20),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  )
+                ],
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
@@ -177,7 +190,8 @@ class _RecordPageState extends State<RecordPage> {
                         dotData: const FlDotData(show: false),
                       ),
                     ],
-                    minY: -1.0, maxY: 1.0,
+                    minY: -1.0,
+                    maxY: 1.0,
                     minX: _spots.isNotEmpty ? _spots.first.x : 0,
                     maxX: _spots.isNotEmpty ? _spots.last.x : 0,
                     lineTouchData: const LineTouchData(enabled: false),
@@ -185,19 +199,30 @@ class _RecordPageState extends State<RecordPage> {
                 ),
               ),
             ),
-            Text(_formatDuration(_duration), style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w300)),
+            Text(
+              _formatDuration(_duration),
+              style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w300),
+            ),
             Hero(
               tag: 'record_button_hero',
               child: GestureDetector(
                 onTap: _toggleRecording,
                 child: Container(
-                  width: 80,
-                  height: 80,
+                  width: ButtonConstants.micButtonSize,
+                  height: ButtonConstants.micButtonSize,
                   decoration: BoxDecoration(
                     color: _isRecording ? Colors.white : const Color(0xFFC31C42),
                     shape: BoxShape.circle,
-                    border: _isRecording ? Border.all(color: const Color(0xFFC31C42), width: 4) : null,
-                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.15), blurRadius: 8, offset: const Offset(0, 4))],
+                    border: _isRecording
+                        ? Border.all(color: const Color(0xFFC31C42), width: 4)
+                        : null,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(40),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      )
+                    ],
                   ),
                   child: Center(
                     child: _isProcessing
@@ -205,13 +230,16 @@ class _RecordPageState extends State<RecordPage> {
                         : Icon(
                             _isRecording ? Icons.stop_rounded : Icons.mic,
                             color: _isRecording ? const Color(0xFFC31C42) : Colors.white,
-                            size: 40,
+                            size: 50,
                           ),
                   ),
                 ),
               ),
             ),
-            Text(_isRecording ? "Tap to Stop" : "Tap to Start", style: const TextStyle(fontSize: 16, color: Colors.grey)),
+            Text(
+              _isRecording ? "Tap to Stop" : "Tap to Start",
+              style: const TextStyle(fontSize: 16, color: Colors.grey),
+            ),
           ],
         ),
       ),
@@ -221,10 +249,14 @@ class _RecordPageState extends State<RecordPage> {
   void _startTimer() {
     _timer?.cancel();
     _duration = Duration.zero;
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) setState(() => _duration += const Duration(seconds: 1));
-    });
+    _timer = Timer.periodic(
+      const Duration(seconds: 1),
+      (timer) {
+        if (mounted) setState(() => _duration += const Duration(seconds: 1));
+      },
+    );
   }
+
   void _stopTimer() {
     _timer?.cancel();
   }
@@ -238,19 +270,30 @@ class _RecordPageState extends State<RecordPage> {
 
   Future<void> _askPatientNameAndSave(String tempPath) async {
     final nameController = TextEditingController();
+
     final patientName = await showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFFFFFFFF),
         title: const Text("Save Recording"),
-        content: TextField(controller: nameController, autofocus: true, decoration: const InputDecoration(labelText: "Patient Name")),
+        content: TextField(
+          controller: nameController,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: "Patient Name"),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(null), child: const Text("Cancel")),
-          ElevatedButton(onPressed: () {
-            final name = nameController.text.trim();
-            if (name.isNotEmpty) Navigator.of(context).pop(name);
-          }, child: const Text("Save")),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final name = nameController.text.trim();
+              if (name.isNotEmpty) Navigator.of(context).pop(name);
+            },
+            child: const Text("Save"),
+          ),
         ],
       ),
     );
@@ -262,11 +305,19 @@ class _RecordPageState extends State<RecordPage> {
     }
 
     try {
-      final String? selectedDirectory = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Please select a folder to save the report:');
+      final String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Please select a folder to save the report:',
+      );
+
       if (selectedDirectory == null) {
-        if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Save operation cancelled.')));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Save operation cancelled.')),
+          );
+        }
         return;
       }
+
       final storagePath = '$selectedDirectory/CardioScope/heart_sounds';
       final storageDir = Directory(storagePath);
       if (!await storageDir.exists()) await storageDir.create(recursive: true);
@@ -282,12 +333,21 @@ class _RecordPageState extends State<RecordPage> {
       await tempFile.delete();
 
       if (!mounted) return;
+
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => ResultsPage(filePath: newPath, patientName: patientName)),
+        MaterialPageRoute(
+          builder: (context) => ReportGeneratedPage(
+            patientName: patientName,
+            filePath: newPath,
+            recordedDate: DateTime.now(),
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error saving file: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error saving file: $e')),
+      );
     }
   }
 }

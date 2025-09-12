@@ -1,24 +1,29 @@
-// lib/pages/results.dart
-
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:cardioscope_app/database_helper.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-class ResultsPage extends StatefulWidget {
-  final String filePath;
-  final String patientName;
+import '../database_helper.dart';
 
-  const ResultsPage({super.key, required this.filePath, required this.patientName});
+class ReportGeneratedPage extends StatefulWidget {
+  final String patientName;
+  final String filePath;
+  final DateTime recordedDate;
+
+  const ReportGeneratedPage({
+    super.key,
+    required this.patientName,
+    required this.filePath,
+    required this.recordedDate,
+  });
 
   @override
-  State<ResultsPage> createState() => _ResultsPageState();
+  State<ReportGeneratedPage> createState() => _ReportGeneratedPageState();
 }
 
-class _ResultsPageState extends State<ResultsPage> {
+class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
   Future<List<FlSpot>>? _waveformFuture;
 
   @override
@@ -27,12 +32,12 @@ class _ResultsPageState extends State<ResultsPage> {
     _waveformFuture = _loadWaveformData();
     _saveReportToDatabase();
   }
-  
+
   Future<void> _saveReportToDatabase() async {
     final report = {
       'patientName': widget.patientName,
       'filePath': widget.filePath,
-      'recordedDate': DateTime.now().toIso8601String(),
+      'recordedDate': widget.recordedDate.toIso8601String(),
       'classification': 'Pending',
       'confidence': 'N/A',
     };
@@ -43,12 +48,12 @@ class _ResultsPageState extends State<ResultsPage> {
     final file = File(widget.filePath);
     final bytes = await file.readAsBytes();
     if (bytes.lengthInBytes <= 44) return [];
-    
-    final pcmBytes = bytes.sublist(44);
+
+    final pcmBytes = bytes.sublist(44); // skip WAV header
     final byteData = ByteData.view(pcmBytes.buffer);
     final spots = <FlSpot>[];
-    
-    const int downsamplingFactor = 50;
+
+    const int downsamplingFactor = 50; // avoid too many points
     for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsamplingFactor)) {
       if (i + 2 <= pcmBytes.lengthInBytes) {
         final sample = byteData.getInt16(i, Endian.little) / 32768.0;
@@ -62,7 +67,8 @@ class _ResultsPageState extends State<ResultsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Analysis for ${widget.patientName}', style: const TextStyle(color: Colors.white)),
+        title: Text("Analysis for ${widget.patientName}",
+            style: const TextStyle(color: Colors.white)),
         backgroundColor: const Color(0xFFC31C42),
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white),
@@ -77,14 +83,17 @@ class _ResultsPageState extends State<ResultsPage> {
             Center(
               child: Text(
                 'Recording Saved!',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold, color: Colors.green[800]),
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold, color: Colors.green[800]),
               ),
             ),
             const SizedBox(height: 16),
             _buildSectionCard("Patient Details", [
               _buildDetailRow("Name:", widget.patientName),
-              _buildDetailRow("File Location:", widget.filePath, isSelectable: true),
-              _buildDetailRow("Recorded:", DateFormat('MMMM d, yyyy HH:mm').format(DateTime.now())),
+              _buildDetailRow("File Location:", widget.filePath,
+                  isSelectable: true),
+              _buildDetailRow("Recorded:",
+                  DateFormat('MMMM d, yyyy HH:mm').format(widget.recordedDate)),
             ]),
             const SizedBox(height: 16),
             _buildSectionCard("Phonocardiogram (PCG)", [
@@ -93,9 +102,14 @@ class _ResultsPageState extends State<ResultsPage> {
                 child: FutureBuilder<List<FlSpot>>(
                   future: _waveformFuture,
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) return const Center(child: Text("Could not load waveform."));
-                    
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return const Center(
+                          child: Text("Could not load waveform."));
+                    }
+
                     return LineChart(
                       LineChartData(
                         titlesData: const FlTitlesData(show: false),
@@ -110,7 +124,8 @@ class _ResultsPageState extends State<ResultsPage> {
                             dotData: const FlDotData(show: false),
                           ),
                         ],
-                        minY: -1, maxY: 1,
+                        minY: -1,
+                        maxY: 1,
                         lineTouchData: const LineTouchData(enabled: false),
                       ),
                     );
@@ -128,7 +143,9 @@ class _ResultsPageState extends State<ResultsPage> {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () { /* PDF Export Logic will go here */ },
+        onPressed: () {
+         
+        },
         icon: const Icon(Icons.picture_as_pdf),
         label: const Text("Export PDF"),
         backgroundColor: const Color(0xFFC31C42),
@@ -147,7 +164,11 @@ class _ResultsPageState extends State<ResultsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+            Text(title,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold)),
             const Divider(height: 20, thickness: 1),
             ...children,
           ],
@@ -156,22 +177,22 @@ class _ResultsPageState extends State<ResultsPage> {
     );
   }
 
-  Widget _buildDetailRow(String label, String value, {bool isSelectable = false}) {
-    return Container(
-      color: const Color(0xFFFFFFFF),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4.0),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("$label ", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
-            Expanded(
-              child: isSelectable
-                  ? SelectableText(value, textAlign: TextAlign.end)
-                  : Text(value, textAlign: TextAlign.end, softWrap: true),
-            ),
-          ],
-        ),
+  Widget _buildDetailRow(String label, String value,
+      {bool isSelectable = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("$label ",
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, color: Colors.black54)),
+          Expanded(
+            child: isSelectable
+                ? SelectableText(value, textAlign: TextAlign.end)
+                : Text(value, textAlign: TextAlign.end, softWrap: true),
+          ),
+        ],
       ),
     );
   }
