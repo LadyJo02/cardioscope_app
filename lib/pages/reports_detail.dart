@@ -1,5 +1,3 @@
-// lib/pages/report_detail.dart
-
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -10,7 +8,6 @@ import 'package:just_audio/just_audio.dart';
 
 class ReportDetailPage extends StatefulWidget {
   final Map<String, dynamic> report;
-
   const ReportDetailPage({super.key, required this.report});
 
   @override
@@ -25,7 +22,14 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   void initState() {
     super.initState();
     _waveformFuture = _loadWaveformData();
-    _player.setFilePath(widget.report['filePath']);
+
+    final path = widget.report['filePath'] as String?;
+    if (path != null) {
+      _player.setFilePath(path).catchError((_) {
+        // satisfy Duration? return type
+        return null;
+      });
+    }
   }
 
   @override
@@ -35,144 +39,208 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   }
 
   Future<List<FlSpot>> _loadWaveformData() async {
-    final file = File(widget.report['filePath']);
+    final path = widget.report['filePath'] as String?;
+    if (path == null) return [];
+    final file = File(path);
+    if (!await file.exists()) return [];
+
     final bytes = await file.readAsBytes();
     if (bytes.lengthInBytes <= 44) return [];
-    
+
     final pcmBytes = bytes.sublist(44);
     final byteData = ByteData.view(pcmBytes.buffer);
 
     final spots = <FlSpot>[];
-    for (int i = 0; i < pcmBytes.lengthInBytes; i += 2) {
-      spots.add(FlSpot((i / 2).toDouble(), byteData.getInt16(i, Endian.little) / 32768.0));
+    const downsample = 40;
+    for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsample)) {
+      if (i + 2 <= pcmBytes.lengthInBytes) {
+        final sample = byteData.getInt16(i, Endian.little) / 32768.0;
+        spots.add(FlSpot((i / 2).toDouble(), sample));
+      }
     }
     return spots;
   }
 
   @override
   Widget build(BuildContext context) {
-    final date = DateTime.parse(widget.report['recordedDate']);
+    final dateString = (widget.report['recordedDate'] != null)
+        ? DateFormat('MMMM d, yyyy HH:mm')
+            .format(DateTime.parse(widget.report['recordedDate']))
+        : '';
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('Report for ${widget.report['patientName']}', style: const TextStyle(color: Colors.white)),
         backgroundColor: const Color(0xFFC31C42),
-        iconTheme: const IconThemeData(color: Colors.white),
+        title: Text(
+          'Report for ${widget.report['patientName'] ?? ''}',
+          style: const TextStyle(color: Colors.white),
+        ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildSectionCard("Playback & Waveform", [
-              SizedBox(
-                height: 150,
-                child: FutureBuilder<List<FlSpot>>(
-                  future: _waveformFuture,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) return const Center(child: Text("Could not load waveform."));
-                    
-                    return LineChart(
-                      LineChartData(
-                        titlesData: const FlTitlesData(show: false),
-                        gridData: const FlGridData(show: false),
-                        borderData: FlBorderData(show: false),
-                        lineBarsData: [
-                          LineChartBarData(
-                            spots: snapshot.data!,
-                            isCurved: false,
-                            color: const Color(0xFFC31C42),
-                            barWidth: 1,
-                            dotData: const FlDotData(show: false),
-                          ),
-                        ],
-                        minY: -1, maxY: 1,
-                        lineTouchData: const LineTouchData(enabled: false),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
-              StreamBuilder<PlayerState>(
-                stream: _player.playerStateStream,
-                builder: (context, snapshot) {
-                  final playerState = snapshot.data;
-                  final processingState = playerState?.processingState;
-                  final playing = playerState?.playing;
-                  
-                  IconData icon = Icons.play_arrow;
-                  if (playing == true) {
-                    icon = Icons.pause;
-                  } else if (processingState == ProcessingState.completed) {
-                    icon = Icons.replay;
-                  }
+            _patientCard(dateString),
+            const SizedBox(height: 16),
+            _playbackCard(),
+            const SizedBox(height: 16),
+            _aiAnalysisCard(),
+          ],
+        ),
+      ),
+    );
+  }
 
-                  return Center(
-                    child: IconButton(
-                      iconSize: 48,
-                      icon: Icon(icon, color: const Color(0xFFC31C42)),
-                      onPressed: () {
-                        if (playing == true) {
-                          _player.pause();
-                        } else if (processingState == ProcessingState.completed) {
-                          _player.seek(Duration.zero);
-                        } else {
-                          _player.play();
-                        }
-                      },
+  Widget _patientCard(String dateString) => Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Patient Details',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const Divider(height: 20),
+            _row('Name:', widget.report['patientName'] ?? ''),
+            const SizedBox(height: 8),
+            _row(
+                'File:',
+                (widget.report['filePath'] ?? '')
+                    .toString()
+                    .split('/')
+                    .last),
+            const SizedBox(height: 8),
+            _row('Recorded:', dateString),
+          ]),
+        ),
+      );
+
+  Widget _playbackCard() => Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Playback & Waveform',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const Divider(height: 20),
+            SizedBox(
+              height: 140,
+              child: FutureBuilder<List<FlSpot>>(
+                future: _waveformFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                    return const Center(child: Text('No waveform available'));
+                  }
+                  return LineChart(
+                    LineChartData(
+                      titlesData: const FlTitlesData(show: false),
+                      gridData: const FlGridData(show: false),
+                      borderData: FlBorderData(show: false),
+                      minY: -1,
+                      maxY: 1,
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: snapshot.data!,
+                          isCurved: false,
+                          color: const Color(0xFFC31C42),
+                          barWidth: 1.2,
+                          dotData: const FlDotData(show: false),
+                        ),
+                      ],
+                      lineTouchData: const LineTouchData(enabled: false),
                     ),
                   );
                 },
               ),
-            ]),
-            const SizedBox(height: 16),
-            _buildSectionCard("Report Details", [
-              _buildDetailRow("Name:", widget.report['patientName']),
-              _buildDetailRow("File:", widget.report['filePath'].split('/').last),
-              _buildDetailRow("Recorded:", DateFormat('MMMM d, yyyy HH:mm').format(date)),
-              _buildDetailRow("Classification:", widget.report['classification'] ?? 'N/A'),
-              _buildDetailRow("Confidence:", widget.report['confidence'] ?? 'N/A'),
-            ]),
-          ],
-        ),
-      ),
-    );
-  }
+            ),
+            const SizedBox(height: 12),
+            StreamBuilder<PlayerState>(
+              stream: _player.playerStateStream,
+              builder: (context, snap) {
+                final state = snap.data;
+                final playing = state?.playing == true;
+                final processingState = state?.processingState;
 
-  // --- Complete Helper Methods ---
-  Widget _buildSectionCard(String title, List<Widget> children) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-            const Divider(height: 20, thickness: 1),
-            ...children,
-          ],
-        ),
-      ),
-    );
-  }
+                IconData icon = Icons.play_arrow;
+                if (playing) {
+                  icon = Icons.pause;
+                } else if (processingState == ProcessingState.completed) {
+                  icon = Icons.replay;
+                }
 
-  Widget _buildDetailRow(String label, String value, {bool isSelectable = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("$label ", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
-          Expanded(
-            child: isSelectable
-                ? SelectableText(value, textAlign: TextAlign.end)
-                : Text(value, textAlign: TextAlign.end, softWrap: true),
-          ),
-        ],
-      ),
-    );
-  }
+                return Center(
+                  child: IconButton(
+                    iconSize: 48,
+                    icon: Icon(icon, color: const Color(0xFFC31C42)),
+                    onPressed: () async {
+                      final path = widget.report['filePath'] as String?;
+                      if (path == null) return;
+                      try {
+                        if (playing) {
+                          await _player.pause();
+                        } else if (processingState ==
+                            ProcessingState.completed) {
+                          await _player.seek(Duration.zero);
+                          await _player.play();
+                        } else {
+                          if (_player.playerState.processingState ==
+                              ProcessingState.idle) {
+                            await _player.setFilePath(path);
+                          }
+                          await _player.play();
+                        }
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Playback error: $e')));
+                      }
+                    },
+                  ),
+                );
+              },
+            ),
+          ]),
+        ),
+      );
+
+  Widget _aiAnalysisCard() => Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('AI Analysis (Placeholder)',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const Divider(height: 20),
+            _row('Classification:',
+                widget.report['classification'] ?? 'Pending'),
+            const SizedBox(height: 8),
+            _row('Confidence:', widget.report['confidence'] ?? 'N/A'),
+          ]),
+        ),
+      );
+
+  Widget _row(String label, String value) => Row(children: [
+        Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, color: Colors.black54))),
+        Expanded(child: Text(value, textAlign: TextAlign.end)),
+      ]);
 }

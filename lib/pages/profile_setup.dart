@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'dashboard.dart';
+// import 'dashboard.dart';
+import '../main.dart';
 
 class ProfileSetupPage extends StatefulWidget {
   const ProfileSetupPage({super.key});
@@ -21,7 +22,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
 
       if (mounted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const DashboardPage()),
+          MaterialPageRoute(builder: (context) => const MainNavigation()),
         );
       }
     }
@@ -143,4 +144,3 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     );
   }
 }
-

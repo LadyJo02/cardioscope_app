@@ -1,3 +1,4 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -35,7 +36,9 @@ class CardioScopeApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: userName == null ? const ProfileSetupPage() : const MainNavigation(),
+      home: userName == null
+          ? const ProfileSetupPage()
+          : const MainNavigation(),
       routes: {
         '/record': (context) => const RecordPage(),
         '/reports': (context) => const ReportsPage(),
@@ -55,10 +58,10 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
 
-  // --- FIX: The "Results" tab now correctly points to the ReportsPage ---
+  // The “Results” tab points to ReportsPage
   final List<Widget> _pages = const [
     DashboardPage(),
-    ReportsPage(), 
+    ReportsPage(),
   ];
 
   void _onItemTapped(int index) {
@@ -72,6 +75,8 @@ class _MainNavigationState extends State<MainNavigation> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       body: _pages[_selectedIndex],
+
+      // --- BIG centered mic button ---
       floatingActionButton: FloatingActionButton.large(
         onPressed: () {
           Navigator.pushNamed(context, '/record');
@@ -83,6 +88,8 @@ class _MainNavigationState extends State<MainNavigation> {
         child: const Icon(Icons.mic, size: 40),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+
+      // --- White bottom bar with notch ---
       bottomNavigationBar: BottomAppBar(
         shape: const CircularNotchedRectangle(),
         notchMargin: 10.0,
@@ -94,7 +101,7 @@ class _MainNavigationState extends State<MainNavigation> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: <Widget>[
             _buildNavItem(Icons.dashboard, 'Dashboard', 0),
-            const SizedBox(width: 80),
+            const SizedBox(width: 80), // space for the FAB notch
             _buildNavItem(Icons.analytics, 'Results', 1),
           ],
         ),
