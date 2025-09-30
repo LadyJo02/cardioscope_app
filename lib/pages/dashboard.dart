@@ -1,8 +1,9 @@
+import 'package:cardioscope_app/database_helper.dart';
+import 'package:cardioscope_app/pages/reports_detail.dart';
+import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-
-import '../widgets/chart_widget.dart';
-import '../widgets/custom_button.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -11,64 +12,160 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
-  final LayerLink _layerLink = LayerLink();
-  OverlayEntry? _overlayEntry;
-  bool _isMenuOpen = false;
+class _DashboardPageState extends State<DashboardPage>
+    with AutomaticKeepAliveClientMixin {
+  final db = DatabaseHelper.instance;
+  List<Map<String, dynamic>> allReports = [];
 
-  void _toggleMenu() {
-    if (_isMenuOpen) {
-      _overlayEntry?.remove();
-      _isMenuOpen = false;
-    } else {
-      _overlayEntry = _createOverlayEntry();
-      Overlay.of(context).insert(_overlayEntry!);
-      _isMenuOpen = true;
-    }
+  // State variables
+  String greeting = "Good day";
+  String userName = "Health Practitioner";
+  int totalPatients = 0;
+  int totalThisWeek = 0;
+
+  // UPDATED: State variables for the new insight panel
+  int todayCount = 0;
+  int todayMRCount = 0;
+  int todayMSCount = 0;
+  int todayMVPCount = 0;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadGreetingAndName();
   }
 
-  OverlayEntry _createOverlayEntry() {
-    RenderBox renderBox = context.findRenderObject() as RenderBox;
-    var size = renderBox.size;
+  Future<void> _loadGreetingAndName() async {
+    final hour = DateTime.now().hour;
+    if (hour < 12) {
+      greeting = "Good morning";
+    } else if (hour < 18) {
+      greeting = "Good afternoon";
+    } else {
+      greeting = "Good evening";
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final savedName = prefs.getString('userName');
+    if (savedName != null && savedName.trim().isNotEmpty) {
+      userName = savedName.trim();
+    }
+    if (mounted) setState(() {});
+  }
 
-    return OverlayEntry(
-      builder: (context) => Positioned(
-        top: kToolbarHeight + 8,
-        right: 16,
-        child: CompositedTransformFollower(
-          link: _layerLink,
-          offset: Offset(size.width - 150, 0),
-          child: Material(
-            color: Colors.transparent,
-            child: Card(
-              elevation: 6,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ListTile(
-                    leading:
-                        const Icon(Icons.folder, color: Color(0xFFC31C42)),
-                    title: const Text("Reports"),
-                    onTap: () {
-                      _toggleMenu();
-                      Navigator.pushNamed(context, '/reports');
-                    },
-                  ),
-                  const Divider(height: 0),
-                  ListTile(
-                    leading:
-                        const Icon(Icons.settings, color: Color(0xFFC31C42)),
-                    title: const Text("Settings"),
-                    onTap: () {
-                      _toggleMenu();
-                      Navigator.pushNamed(context, '/settings');
-                    },
-                  ),
-                ],
-              ),
+  Future<void> _loadData() async {
+    if (!mounted) return;
+
+    final results = await Future.wait([
+      db.getAllReports(),
+      db.getTodayScreeningCount(),
+      db.getTodayMRCount(),
+      db.getTodayMSCount(),
+      db.getTodayMVPCount(),
+    ]);
+
+    final data = results[0] as List<Map<String, dynamic>>;
+
+    final now = DateTime.now();
+    final weekAgo = now.subtract(const Duration(days: 7));
+    final tot = data.length;
+    final thisWeek = data.where((r) {
+      try {
+        return DateTime.parse(r['created_at']).isAfter(weekAgo);
+      } catch (_) {
+        return false;
+      }
+    }).length;
+
+    setState(() {
+      allReports = data;
+      totalPatients = tot;
+      totalThisWeek = thisWeek;
+      todayCount = results[1] as int;
+      todayMRCount = results[2] as int;
+      todayMSCount = results[3] as int;
+      todayMVPCount = results[4] as int;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final recentPatients = allReports.take(3).toList();
+
+    return VisibilityDetector(
+      key: const Key('dashboard_detector'),
+      onVisibilityChanged: (visibilityInfo) {
+        if (visibilityInfo.visibleFraction > 0.5) {
+          _loadData();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: const Color(0xFFC31C42),
+          title: const Text('Dashboard', style: TextStyle(color: Colors.white)),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.settings, color: Colors.white),
+              onPressed: () => Navigator.pushNamed(context, '/settings'),
+            ),
+          ],
+        ),
+        body: RefreshIndicator(
+          onRefresh: _loadData,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildGreetingCard(),
+                const SizedBox(height: 20),
+                Row(children: [
+                  _statCard('Total Patients', totalPatients,
+                      Icons.people_alt_rounded, Colors.blue),
+                  const SizedBox(width: 12),
+                  _statCard('This Week', totalThisWeek,
+                      Icons.calendar_today_rounded, Colors.green),
+                ]),
+                const SizedBox(height: 24),
+                _buildRecentPatientsHeader(),
+                const SizedBox(height: 8),
+                if (recentPatients.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 40),
+                    child: Center(
+                      child: Text('No recent patient screenings.',
+                          style: TextStyle(color: Colors.black54)),
+                    ),
+                  )
+                else
+                  ...recentPatients.map((p) => _buildPatientTile(p)),
+                const SizedBox(height: 24),
+                Text('Today\'s Insights',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _insightCard('Screenings', '$todayCount', Colors.blue),
+                    const SizedBox(width: 8),
+                    _insightCard('MR Detected', '$todayMRCount', Colors.orange),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _insightCard('MS Detected', '$todayMSCount', Colors.purple),
+                    const SizedBox(width: 8),
+                    _insightCard('MVP Detected', '$todayMVPCount', Colors.teal),
+                  ],
+                ),
+              ],
             ),
           ),
         ),
@@ -76,145 +173,137 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final today = DateFormat('MMMM d, y').format(DateTime.now());
+  // --- Helper Widgets ---
 
-    final recentResults = [
-      {
-        "patient": "Patient 001",
-        "status": "Normal",
-        "date": "Sept 10, 2025 - 11:30 AM",
-        "color": Colors.green,
-      },
-      {
-        "patient": "Patient 002",
-        "status": "MR Detected",
-        "date": "Sept 9, 2025 - 03:15 PM",
-        "color": Colors.orange,
-      },
-      {
-        "patient": "Patient 003",
-        "status": "Normal",
-        "date": "Sept 8, 2025 - 09:45 AM",
-        "color": Colors.red,
-      },
-    ];
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          "Dashboard",
-          style: TextStyle(color: Colors.white),
-          ), 
-        backgroundColor: const Color(0xFFC31C42),
-        actions: [
-          CompositedTransformTarget(
-            link: _layerLink,
-            child: IconButton(
-              icon: const Icon(Icons.more_vert, color: Colors.white),
-              onPressed: _toggleMenu,
-            ),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
+  Widget _buildGreetingCard() {
+    return Card(
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Greeting
-            Text(
-              "Hello, Joanna 👋",
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF333333),
-                  ),
+            RichText(
+              text: TextSpan(
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold),
+                children: [
+                  TextSpan(
+                      text: '$greeting, ',
+                      style: const TextStyle(color: Colors.black87)),
+                  TextSpan(
+                      text: userName,
+                      style: const TextStyle(
+                          color: Color(0xFFC31C42),
+                          fontWeight: FontWeight.bold)),
+                  const TextSpan(
+                      text: '!', style: TextStyle(color: Colors.black87)),
+                ],
+              ),
             ),
-            Text(
-              today,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF666666),
-                  ),
-            ),
-            const SizedBox(height: 20),
-
-            // Start Recording Button
-            CustomButton(
-              label: "Start New Recording",
-              icon: Icons.mic,
-              onPressed: () {
-                Navigator.pushNamed(context, '/record');
-              },
-            ),
-            const SizedBox(height: 24),
-
-            // Recent Results
-            Text(
-              "Recent Results",
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF333333),
-                  ),
-            ),
-            const SizedBox(height: 10),
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: recentResults.length,
-              itemBuilder: (context, index) {
-                final result = recentResults[index];
-                return Card(
-                  color: Colors.white,
-                  elevation: 2,
-                  margin: const EdgeInsets.symmetric(vertical: 6),
-                  child: ListTile(
-                    leading:
-                        Icon(Icons.favorite, color: result["color"] as Color),
-                    title:
-                        Text("${result["patient"]} - ${result["status"]}"),
-                    subtitle: Text(result["date"] as String),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 24),
-
-            // Patient Records Shortcut
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  "Patient Records",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                TextButton(
-                  onPressed: () {
-                    Navigator.pushNamed(context, '/reports');
-                  },
-                  child: const Text(
-                    "View All",
-                    style: TextStyle(color: Color(0xFFC31C42)),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // Insights Chart
-            Text(
-              "Insights",
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF333333),
-                  ),
-            ),
-            const SizedBox(height: 10),
-            const SizedBox(
-              height: 200,
-              child: ChartWidget(),
+            const SizedBox(height: 8),
+            const Text(
+              'AI-powered assistant for heart sound analysis. Quick screening and easy patient report management.',
+              style:
+                  TextStyle(fontSize: 14, color: Colors.black54, height: 1.4),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statCard(String label, int value, IconData icon, Color color) {
+    return Expanded(
+      child: Card(
+        color: Colors.white,
+        elevation: 3,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, color: color, size: 28),
+            const SizedBox(height: 8),
+            Text('$value',
+                style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87)),
+            const SizedBox(height: 4),
+            Text(label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.black54,
+                    fontWeight: FontWeight.w500)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecentPatientsHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text('Recent Patients',
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700)),
+        if (allReports.length > 3)
+          GestureDetector(
+            onTap: () => Navigator.pushNamed(context, '/reports'),
+            child: const Text('View All',
+                style: TextStyle(
+                    color: Color(0xFFC31C42), fontWeight: FontWeight.bold)),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildPatientTile(Map<String, dynamic> p) {
+    return Card(
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: ListTile(
+        leading: UIHelpers.getStatusIndicator(p['diagnosis']),
+        title: Text(p['patient_name'] ?? 'Unnamed',
+            style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(
+            '${p['diagnosis'] ?? 'Pending'} • ${p['created_at']?.substring(0, 10) ?? ''}'),
+        trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ReportDetailPage(report: p)),
+        ).then((_) => _loadData()),
+      ),
+    );
+  }
+
+  Widget _insightCard(String title, String value, Color color) {
+    return Expanded(
+      child: Card(
+        color: Colors.white,
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(value,
+                style: TextStyle(
+                    fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+            const SizedBox(height: 4),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          ]),
         ),
       ),
     );

@@ -1,42 +1,105 @@
+// lib/main.dart
+import 'package:cardioscope_app/pages/profile_setup.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-// Import pages
 import 'pages/dashboard.dart';
 import 'pages/record.dart';
 import 'pages/reports.dart';
-import 'pages/results.dart';
 import 'pages/settings.dart';
+import 'services/tflite_service.dart'; 
 
-void main() {
-  runApp(const CardioScopeApp());
+final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // ✅ Load preferences
+  final prefs = await SharedPreferences.getInstance();
+  final isDarkMode = prefs.getBool('isDarkMode') ?? false;
+  themeNotifier.value = isDarkMode ? ThemeMode.dark : ThemeMode.light;
+  final String? userName = prefs.getString('userName');
+
+  // ✅ Request storage permission
+  final asked = prefs.getBool('storagePermissionAsked') ?? false;
+  if (!asked) {
+    if (await Permission.storage.request().isGranted) {
+      await prefs.setBool('storagePermissionAsked', true);
+    }
+  }
+
+  // ✅ Run batch test ONCE before starting the app
+  final tflite = TfliteService();
+  await tflite.loadModel();
+  await tflite.testBatch([
+    "assets/test_wavs/sample1_MR_001.wav", 
+    "assets/test_wavs/sample2_MR_012.wav", 
+    "assets/test_wavs/sample3_MR_035.wav", 
+    "assets/test_wavs/sample4_MS_042.wav", 
+    "assets/test_wavs/sample5_MS_062.wav", 
+    "assets/test_wavs/sample6_MVP_045.wav", 
+    "assets/test_wavs/sample7_MVP_054.wav", 
+    "assets/test_wavs/sample8_N_119.wav", 
+    "assets/test_wavs/sample9_N_174.wav", 
+    "assets/test_wavs/sample10_N_197.wav", 
+  ]);
+
+  // ✅ Then launch the app normally
+  runApp(CardioScopeApp(userName: userName));
 }
 
 class CardioScopeApp extends StatelessWidget {
-  const CardioScopeApp({super.key});
+  final String? userName;
+  const CardioScopeApp({super.key, this.userName});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'CardioScope',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primaryColor: const Color(0xFFC31C42),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFC31C42),
-          primary: const Color(0xFFC31C42),
-        ),
-        useMaterial3: true,
-      ),
-      home: const MainNavigation(),
-      routes: {
-        '/record': (context) => const RecordPage(),
-        '/reports': (context) => const ReportsPage(),
-        '/settings': (context) => const SettingsPage(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeNotifier,
+      builder: (_, mode, __) {
+        return MaterialApp(
+          title: 'CardioScope',
+          debugShowCheckedModeBanner: false,
+          
+          themeMode: mode,
+          theme: ThemeData(
+            brightness: Brightness.light,
+            scaffoldBackgroundColor: const Color(0xFFF5F5F5),
+            primaryColor: const Color(0xFFC31C42),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFFC31C42),
+              brightness: Brightness.light,
+            ),
+            useMaterial3: true,
+          ),
+          darkTheme: ThemeData(
+            brightness: Brightness.dark,
+            primaryColor: const Color(0xFFC31C42),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFFC31C42),
+              brightness: Brightness.dark,
+            ),
+            useMaterial3: true,
+          ),
+          
+          // **CORRECT INITIAL ROUTE LOGIC**
+          home: userName == null || userName!.isEmpty
+              ? const ProfileSetupPage()
+              : const MainNavigation(),
+
+          routes: {
+            '/record': (context) => const RecordPage(),
+            '/reports': (context) => const ReportsPage(),
+            '/settings': (context) => SettingsPage(themeNotifier: themeNotifier),
+          },
+        );
       },
     );
   }
 }
 
+// MainNavigation class remains the same
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
 
@@ -47,48 +110,92 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
 
+  // **ADD A PAGE CONTROLLER FOR SMOOTH NAVIGATION**
+  final PageController _pageController = PageController();
+
   final List<Widget> _pages = const [
     DashboardPage(),
-    RecordPage(),
-    ResultsPage(),
+    ReportsPage(),
   ];
 
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
+      // Animate to the page
+      _pageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
     });
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _pages[_selectedIndex],
-      // We wrap the BottomNavigationBar with a Container to apply a custom shadow
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white, // Or Theme.of(context).canvasColor
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 8,
-              offset: const Offset(0, -3), // Shadow position (moves it upwards)
-            ),
+      // **USE PAGEVIEW TO KEEP PAGE STATE**
+      body: PageView(
+        controller: _pageController,
+        onPageChanged: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+        children: _pages,
+      ),
+      floatingActionButton: Hero(
+        tag: 'record_button_hero',
+        child: FloatingActionButton.large(
+          onPressed: () {
+            Navigator.pushNamed(context, '/record');
+          },
+          backgroundColor: Theme.of(context).primaryColor,
+          foregroundColor: Colors.white,
+          elevation: 8.0,
+          shape: const CircleBorder(),
+          child: const Icon(Icons.mic, size: 40),
+        ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      bottomNavigationBar: BottomAppBar(
+        color: Colors.white,
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 10.0,
+        height: 70,
+        elevation: 10,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: <Widget>[
+            _buildNavItem(Icons.dashboard_rounded, 'Dashboard', 0),
+            const SizedBox(width: 80), // space for the FAB notch
+            _buildNavItem(Icons.analytics_rounded, 'Results', 1),
           ],
-        ),      
-      child: BottomNavigationBar(
-        elevation: 0, // Remove default shadow
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xFFC31C42),
-        unselectedItemColor: Colors.grey,
-        backgroundColor: Colors.white,
-        items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.dashboard), label: 'Dashboard'),
-          BottomNavigationBarItem(icon: Icon(Icons.mic), label: 'Record'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.analytics), label: 'Results'),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItem(IconData icon, String label, int index) {
+    final isSelected = _selectedIndex == index;
+    final color = isSelected ? Theme.of(context).primaryColor : Colors.grey;
+
+    return InkWell(
+      onTap: () => _onItemTapped(index),
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(icon, color: color),
+            const SizedBox(height: 4),
+            Text(label, style: TextStyle(color: color, fontSize: 12)),
           ],
         ),
       ),

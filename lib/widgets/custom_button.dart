@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
 
+/// Shared constants for buttons
+class ButtonConstants {
+  /// size of the large mic button on Record page
+  static const double micButtonSize = 120.0;
+}
+
 class CustomButton extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -25,7 +31,7 @@ class CustomButton extends StatelessWidget {
       ),
       onPressed: onPressed,
       style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFC31C42), // ✅ Always CardioScope Red
+        backgroundColor: const Color(0xFFC31C42),
         minimumSize: const Size(double.infinity, 50),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
