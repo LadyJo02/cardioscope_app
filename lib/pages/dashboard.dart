@@ -1,7 +1,9 @@
+// lib/pages/dashboard.dart
 import 'package:cardioscope_app/database_helper.dart';
 import 'package:cardioscope_app/pages/reports_detail.dart';
 import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
@@ -23,7 +25,7 @@ class _DashboardPageState extends State<DashboardPage>
   int totalPatients = 0;
   int totalThisWeek = 0;
 
-  // UPDATED: State variables for the new insight panel
+  // Insights panel
   int todayCount = 0;
   int todayMRCount = 0;
   int todayMSCount = 0;
@@ -60,10 +62,11 @@ class _DashboardPageState extends State<DashboardPage>
 
     final results = await Future.wait([
       db.getAllReports(),
-      db.getTodayScreeningCount(),
-      db.getTodayMRCount(),
-      db.getTodayMSCount(),
-      db.getTodayMVPCount(),
+      // TODO: implement these helper queries in db if needed
+      Future.value(0), // today screenings placeholder
+      Future.value(0), // today MR
+      Future.value(0), // today MS
+      Future.value(0), // today MVP
     ]);
 
     final data = results[0] as List<Map<String, dynamic>>;
@@ -73,7 +76,11 @@ class _DashboardPageState extends State<DashboardPage>
     final tot = data.length;
     final thisWeek = data.where((r) {
       try {
-        return DateTime.parse(r['created_at']).isAfter(weekAgo);
+        final dateStr = r['record_date'] ?? r['analysis_date'];
+        if (dateStr is String) {
+          return DateTime.parse(dateStr).isAfter(weekAgo);
+        }
+        return false;
       } catch (_) {
         return false;
       }
@@ -162,7 +169,7 @@ class _DashboardPageState extends State<DashboardPage>
                   children: [
                     _insightCard('MS Detected', '$todayMSCount', Colors.purple),
                     const SizedBox(width: 8),
-                    _insightCard('MVP Detected', '$todayMVPCount', Colors.teal),
+                    _insightCard('MVP Detected', '$todayMVPCount', Colors.green),
                   ],
                 ),
               ],
@@ -204,6 +211,11 @@ class _DashboardPageState extends State<DashboardPage>
                       text: '!', style: TextStyle(color: Colors.black87)),
                 ],
               ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              DateFormat('MMMM d, yyyy – HH:mm').format(DateTime.now()),
+              style: const TextStyle(fontSize: 14, color: Colors.black54),
             ),
             const SizedBox(height: 8),
             const Text(
@@ -267,17 +279,31 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Widget _buildPatientTile(Map<String, dynamic> p) {
+    String dateTimeString = '';
+    try {
+      final raw = p['analysis_date'] ?? p['record_date'];
+      if (raw is String) {
+        final dt = DateTime.parse(raw);
+        dateTimeString = DateFormat('yyyy-MM-dd HH:mm').format(dt);
+      }
+    } catch (_) {}
+
+    final id = p['user_id'];
+    final formattedId =
+        id != null ? DatabaseHelper.instance.formatPatientId(id as int) : 'N/A';
+
     return Card(
       color: Colors.white,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: ListTile(
-        leading: UIHelpers.getStatusIndicator(p['diagnosis']),
-        title: Text(p['patient_name'] ?? 'Unnamed',
-            style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(
-            '${p['diagnosis'] ?? 'Pending'} • ${p['created_at']?.substring(0, 10) ?? ''}'),
+        leading: UIHelpers.getStatusIndicator(p['diagnosis'], size: 12.0),
+        title: Text(
+          '$formattedId – ${p['name'] ?? 'Unnamed'}',
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text('${p['diagnosis'] ?? 'Pending'} • $dateTimeString'),
         trailing: const Icon(Icons.chevron_right, color: Colors.grey),
         onTap: () => Navigator.push(
           context,

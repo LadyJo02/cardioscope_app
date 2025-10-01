@@ -36,8 +36,8 @@ class _RecordPageState extends State<RecordPage> {
   final int _maxDataPoints = 500;
 
   Timer? _timer;
-  Duration _duration = Duration.zero;
   Timer? _recordingTimer;
+  Duration _duration = Duration.zero;
 
   @override
   void initState() {
@@ -69,7 +69,8 @@ class _RecordPageState extends State<RecordPage> {
     if (!hasPermission) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Microphone permission required.')));
+          const SnackBar(content: Text('Microphone permission required.')),
+        );
       }
       setState(() => _isProcessing = false);
       return;
@@ -104,8 +105,9 @@ class _RecordPageState extends State<RecordPage> {
 
     setState(() {
       _isRecording = true;
-      _spots = []; // This clears the spots, causing the error before the fix
+      _spots = [];
       _timeCounter = 0;
+      _duration = Duration.zero;
     });
 
     _startTimer();
@@ -115,7 +117,7 @@ class _RecordPageState extends State<RecordPage> {
   void _startAutoStopTimer() {
     _recordingTimer?.cancel();
     const recordingDuration = Duration(seconds: 4);
-    
+
     _recordingTimer = Timer(recordingDuration, () {
       if (_isRecording && mounted) {
         _toggleRecording();
@@ -142,10 +144,10 @@ class _RecordPageState extends State<RecordPage> {
 
       if (path != null) {
         final result = await _tfliteService.runInference(filePath: path);
-        
+
         if (mounted) {
           setState(() => _isProcessing = false);
-          await _askPatientNameAndSave(path, result);
+          await _askPatientInfoAndSave(path, result);
         }
       } else {
         setState(() => _isProcessing = false);
@@ -171,11 +173,27 @@ class _RecordPageState extends State<RecordPage> {
       });
     }
   }
-  
+
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _duration += const Duration(seconds: 1));
+    });
+  }
+
+  void _stopTimer() => _timer?.cancel();
+
+  String _formatDuration(Duration d) {
+    final mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final ss = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return "$mm:$ss";
+  }
+
   @override
   Widget build(BuildContext context) {
-    final String instructionText = _isRecording 
-        ? "Recording... (stops in 4s)" 
+    final String instructionText = _isRecording
+        ? "Recording... (stops in 4s)"
         : "Tap to Start";
 
     return Scaffold(
@@ -191,9 +209,9 @@ class _RecordPageState extends State<RecordPage> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Expanded(
-              child: _isRecording ? _buildRecordingView() : _buildGuidelinesView(),
+              child:
+                  _isRecording ? _buildRecordingView() : _buildGuidelinesView(),
             ),
-            
             Hero(
               tag: 'record_button_hero',
               child: GestureDetector(
@@ -202,7 +220,8 @@ class _RecordPageState extends State<RecordPage> {
                   width: ButtonConstants.micButtonSize,
                   height: ButtonConstants.micButtonSize,
                   decoration: BoxDecoration(
-                    color: _isRecording ? Colors.white : const Color(0xFFC31C42),
+                    color:
+                        _isRecording ? Colors.white : const Color(0xFFC31C42),
                     shape: BoxShape.circle,
                     border: _isRecording
                         ? Border.all(color: const Color(0xFFC31C42), width: 4)
@@ -216,11 +235,13 @@ class _RecordPageState extends State<RecordPage> {
                   ),
                   child: Center(
                     child: _isProcessing
-                        ? const CircularProgressIndicator(color: Color(0xFFC31C42))
+                        ? const CircularProgressIndicator(
+                            color: Color(0xFFC31C42))
                         : Icon(
                             _isRecording ? Icons.stop_rounded : Icons.mic,
-                            color:
-                                _isRecording ? const Color(0xFFC31C42) : Colors.white,
+                            color: _isRecording
+                                ? const Color(0xFFC31C42)
+                                : Colors.white,
                             size: 50),
                   ),
                 ),
@@ -254,26 +275,10 @@ class _RecordPageState extends State<RecordPage> {
             child: Image.asset('assets/images/mitral_area_guide.png'),
           ),
           const SizedBox(height: 24),
-          _buildGuidelineItem(
-            context,
-            Icons.mic_off_rounded,
-            'Ensure a quiet environment.',
-          ),
-          _buildGuidelineItem(
-            context,
-            Icons.place_rounded,
-            'Place stethoscope at the mitral area (as shown).',
-          ),
-          _buildGuidelineItem(
-            context,
-            Icons.timer_rounded,
-            'The recording will last 4 seconds for a complete analysis.',
-          ),
-          _buildGuidelineItem(
-            context,
-            Icons.person_rounded,
-            'Ensure the patient remains still during recording.',
-          ),
+          _buildGuidelineItem(Icons.mic_off_rounded, 'Ensure a quiet environment.'),
+          _buildGuidelineItem(Icons.place_rounded, 'Place stethoscope at the mitral area (as shown).'),
+          _buildGuidelineItem(Icons.timer_rounded, 'The recording will last 4 seconds for a complete analysis.'),
+          _buildGuidelineItem(Icons.person_rounded, 'Ensure the patient remains still during recording.'),
         ],
       ),
     );
@@ -299,7 +304,6 @@ class _RecordPageState extends State<RecordPage> {
                 )
               ],
             ),
-            // **CHART FIX: Check if _spots is empty before building the chart**
             child: _spots.isEmpty
                 ? const Center(
                     child: Text(
@@ -334,19 +338,20 @@ class _RecordPageState extends State<RecordPage> {
           ),
         ),
         const SizedBox(height: 24),
-        Text(_formatDuration(_duration),
-            style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w300)),
+        Text(
+          _formatDuration(_duration),
+          style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w300),
+        ),
       ],
     );
   }
 
-  Widget _buildGuidelineItem(BuildContext context, IconData icon, String text) {
+  Widget _buildGuidelineItem(IconData icon, String text) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: Theme.of(context).primaryColor, size: 24),
+          Icon(icon, color: const Color(0xFFC31C42), size: 24),
           const SizedBox(width: 16),
           Expanded(child: Text(text, style: const TextStyle(fontSize: 15, height: 1.4))),
         ],
@@ -354,72 +359,64 @@ class _RecordPageState extends State<RecordPage> {
     );
   }
 
-  void _startTimer() {
-    _timer?.cancel();
-    _duration = Duration.zero;
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) setState(() => _duration += const Duration(seconds: 1));
-    });
-  }
-
-  void _stopTimer() => _timer?.cancel();
-
-  String _formatDuration(Duration d) {
-    final mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final ss = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return "$mm:$ss";
-  }
-
-  Future<void> _askPatientNameAndSave(String tempPath, Map<String, dynamic>? aiResult) async {
+  Future<void> _askPatientInfoAndSave(
+      String tempPath, Map<String, dynamic>? aiResult) async {
     final nameController = TextEditingController();
-    final patientName = await showDialog<String>(
+    final ageController = TextEditingController();
+    String gender = "Male";
+
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
       builder: (c) => AlertDialog(
+        backgroundColor: Colors.white, 
         title: const Text("Save Recording"),
-        content: TextField(
-          controller: nameController,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: "Patient Name"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: nameController, decoration: const InputDecoration(labelText: "Patient Name")),
+            TextField(controller: ageController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Age")),
+            DropdownButtonFormField<String>(
+              initialValue: gender,
+              items: const [
+                DropdownMenuItem(value: "Male", child: Text("Male")),
+                DropdownMenuItem(value: "Female", child: Text("Female")),
+              ],
+              onChanged: (val) => gender = val ?? "Male",
+              decoration: const InputDecoration(labelText: "Gender"),
+            ),
+          ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(c).pop(null), child: const Text("Cancel")),
-          ElevatedButton(onPressed: () {
-            final n = nameController.text.trim();
-            if (n.isNotEmpty) Navigator.of(c).pop(n);
-          }, child: const Text("Save")),
+          ElevatedButton(
+            onPressed: () {
+              if (nameController.text.trim().isNotEmpty) {
+                Navigator.of(c).pop({
+                  "name": nameController.text.trim(),
+                  "age": int.tryParse(ageController.text.trim()) ?? 0,
+                  "gender": gender
+                });
+              }
+            },
+            child: const Text("Save"),
+          ),
         ],
       ),
     );
 
-    if (patientName == null || patientName.isEmpty) {
-      final t = File(tempPath);
-      if (await t.exists()) await t.delete();
-      return;
-    }
+    if (result == null) return;
 
     try {
-      final selectedDirectory = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: 'Please select a folder to save the report:',
-      );
-
-      if (selectedDirectory == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Save operation cancelled.')));
-        }
-        return;
-      }
+      final selectedDirectory = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Select folder to save:');
+      if (selectedDirectory == null) return;
 
       final storagePath = '$selectedDirectory/CardioScope/heart_sounds';
-      final storageDir = Directory(storagePath);
-      if (!await storageDir.exists()) await storageDir.create(recursive: true);
+      await Directory(storagePath).create(recursive: true);
 
-      final date = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      final time = DateFormat('HHmmss').format(DateTime.now());
-      final safeName = patientName.replaceAll(RegExp(r'\s+'), "_");
-      final newFileName = "${safeName}_${date}_$time.wav";
-      final newPath = "$storagePath/$newFileName";
+      final date = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final safeName = result['name'].replaceAll(RegExp(r'\s+'), "_");
+      final newPath = "$storagePath/${safeName}_$date.wav";
 
       final tempFile = File(tempPath);
       await tempFile.copy(newPath);
@@ -427,8 +424,10 @@ class _RecordPageState extends State<RecordPage> {
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (c) => ReportGeneratedPage(
-          patientName: patientName,
+        builder: (_) => ReportGeneratedPage(
+          patientName: result['name'],
+          patientAge: result['age'],
+          patientGender: result['gender'],
           filePath: newPath,
           recordedDate: DateTime.now(),
           classification: aiResult?['label'] ?? 'Error',
@@ -437,8 +436,7 @@ class _RecordPageState extends State<RecordPage> {
       ));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error saving file: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error saving: $e')));
       }
     }
   }

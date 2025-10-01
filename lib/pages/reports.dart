@@ -1,8 +1,9 @@
-// lib/pages/reports.dart
+import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../database_helper.dart';
-import 'reports_detail.dart'; // Corrected import name
+import 'reports_detail.dart';
 
 class ReportsPage extends StatefulWidget {
   const ReportsPage({super.key});
@@ -10,11 +11,9 @@ class ReportsPage extends StatefulWidget {
   State<ReportsPage> createState() => _ReportsPageState();
 }
 
-class _ReportsPageState extends State<ReportsPage>
-    with AutomaticKeepAliveClientMixin {
+class _ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
-
   final db = DatabaseHelper.instance;
   List<Map<String, dynamic>> reports = [];
 
@@ -47,21 +46,40 @@ class _ReportsPageState extends State<ReportsPage>
                 itemCount: reports.length,
                 itemBuilder: (_, i) {
                   final r = reports[i];
+                  final userId = r['user_id'] as int?;
+                  final patientId = userId != null
+                      ? db.formatPatientId(userId)
+                      : 'N/A';
+
+                  String dateString = '';
+                  try {
+                    final raw = r['analysis_date'] ?? r['record_date'];
+                    if (raw is String) {
+                      final dt = DateTime.parse(raw);
+                      dateString = DateFormat('yyyy-MM-dd HH:mm').format(dt);
+                    }
+                  } catch (_) {}
+
                   return Card(
                     color: Colors.white,
                     elevation: 2,
                     margin: const EdgeInsets.symmetric(vertical: 8),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     child: ListTile(
-                      // CRITICAL FIX: Use 'patient_name' which is the database column name
-                      title: Text(r['patient_name'] ?? 'Unnamed'),
+                      leading: UIHelpers.getStatusIndicator(r['diagnosis'], size: 12.0),
+                      tileColor: Colors.transparent,
+                      splashColor: Colors.transparent, 
+                      title: Text(
+                        '${r['name'] ?? 'Unnamed'}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                       subtitle: Text(
-                          'Last analysis: ${r['created_at'] ?? ''} • ${r['diagnosis'] ?? 'Pending'}'),
+                        'ID: $patientId • ${r['diagnosis'] ?? 'Pending'} • $dateString',
+                      ),
                       onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => ReportDetailPage(report: r))),
+                        context,
+                        MaterialPageRoute(builder: (_) => ReportDetailPage(report: r)),
+                      ),
                     ),
                   );
                 },

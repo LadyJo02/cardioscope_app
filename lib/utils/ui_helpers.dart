@@ -6,14 +6,15 @@ class UIHelpers {
   static Color getStatusColor(String? classification) {
     switch (classification) {
       case 'Normal':
-        return Colors.green.shade600;
-      case 'Murmur': // Or other abnormal types like MS, MR, MVP
-      case 'MS':
+        return Colors.green; // Normal = green
       case 'MR':
+        return Colors.orange; // MR = orange
+      case 'MS':
+        return Colors.purple; // MS = purple
       case 'MVP':
-        return Colors.red.shade600;
-      default: // This will cover 'Pending' or null
-        return Colors.grey.shade400;
+        return Colors.green; // MVP = green
+      default: // Pending or null
+        return Colors.grey;
     }
   }
 

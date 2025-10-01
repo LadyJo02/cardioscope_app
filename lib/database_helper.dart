@@ -1,89 +1,105 @@
-// lib/database_helper.dart
-import 'dart:io';
-
 import 'package:path/path.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
-  static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
-  static Database? _database;
+  static const _databaseName = "cardioscope.db";
+  static const _databaseVersion = 1;
 
   DatabaseHelper._privateConstructor();
+  static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
 
-  Future<Database> get database async => _database ??= await _initDatabase();
+  Database? _database;
+
+  Future<Database> get database async {
+    _database ??= await _initDatabase();
+    return _database!;
+  }
 
   Future<Database> _initDatabase() async {
-    Directory documentsDirectory = await getApplicationDocumentsDirectory();
-    String path = join(documentsDirectory.path, 'cardioscope.db');
-    return await openDatabase(
-      path,
-      version: 3, // **INCREMENT VERSION TO 3**
-      onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
-    );
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, _databaseName);
+    return await openDatabase(path, version: _databaseVersion, onCreate: _onCreate);
   }
 
   Future _onCreate(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE recordings(
+      CREATE TABLE users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        patient_name TEXT,
-        file_path TEXT,
+        name TEXT NOT NULL,
+        age INTEGER,
+        gender TEXT
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE heart_sound_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        file_path TEXT NOT NULL,
+        record_date TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE mitral_valve_analysis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        record_id INTEGER,
         diagnosis TEXT,
-        confidence REAL, 
-        created_at TEXT
-      )
+        confidence REAL,
+        analysis_date TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (record_id) REFERENCES heart_sound_records (id) ON DELETE CASCADE
+      );
     ''');
   }
 
-  Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      await db.execute("ALTER TABLE recordings ADD COLUMN patient_name TEXT");
-    }
-    if (oldVersion < 3) {
-      // **ADD CONFIDENCE COLUMN**
-      await db.execute("ALTER TABLE recordings ADD COLUMN confidence REAL");
-    }
+  // ----------------- INSERTS -----------------
+  Future<int> insertUser(Map<String, dynamic> user) async {
+    final db = await database;
+    // Check if user already exists (same name, age, gender)
+    final existing = await db.query('users',
+        where: 'name = ? AND age = ? AND gender = ?',
+        whereArgs: [user['name'], user['age'], user['gender']]);
+    if (existing.isNotEmpty) return existing.first['id'] as int;
+    return await db.insert('users', user);
   }
 
-  Future<int> createReport(Map<String, dynamic> row) async {
-    final db = await instance.database;
-    return await db.insert('recordings', {
-      'patient_name': row['patientName'],
-      'file_path': row['filePath'],
-      'diagnosis': row['classification'],
-      'confidence': row['confidence'], // **SAVE CONFIDENCE**
-      'created_at': row['recordedDate'],
-    });
+  Future<int> insertRecord(Map<String, dynamic> record) async {
+    final db = await database;
+    return await db.insert('heart_sound_records', record);
   }
 
+  Future<int> insertAnalysis(Map<String, dynamic> analysis) async {
+    final db = await database;
+    return await db.insert('mitral_valve_analysis', analysis);
+  }
+
+  // ----------------- FETCH -----------------
   Future<List<Map<String, dynamic>>> getAllReports() async {
-    final db = await instance.database;
-    return await db.query('recordings', orderBy: 'created_at DESC');
+    final db = await database;
+    final result = await db.rawQuery('''
+      SELECT u.id as user_id, u.name, u.age, u.gender,
+             r.id as record_id, r.file_path, r.record_date,
+             a.diagnosis, a.confidence, a.analysis_date
+      FROM users u
+      JOIN heart_sound_records r ON u.id = r.user_id
+      JOIN mitral_valve_analysis a ON r.id = a.record_id
+      ORDER BY a.analysis_date DESC;
+    ''');
+    return result;
   }
 
-  // --- Insight Helpers ---
-
-  Future<int> getTodayScreeningCount() async {
-    final db = await instance.database;
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final res = await db.rawQuery(
-        "SELECT COUNT(*) as cnt FROM recordings WHERE substr(created_at,1,10)=?",
-        [today]);
-    return Sqflite.firstIntValue(res) ?? 0;
+  /// Format patient ID as CS0000001, CS0000002, etc.
+  String formatPatientId(int id) {
+    return 'CS${id.toString().padLeft(7, '0')}';
   }
 
-  Future<int> _getDailyCountForCondition(String condition) async {
-    final db = await instance.database;
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final res = await db.rawQuery(
-        "SELECT COUNT(*) FROM recordings WHERE diagnosis = ? AND substr(created_at,1,10) = ?",
-        [condition, today]);
-    return Sqflite.firstIntValue(res) ?? 0;
+
+  // ----------------- UTILS -----------------
+  Future<void> deleteDatabaseFile() async {
+    final path = join((await getDatabasesPath()), _databaseName);
+    try {
+      await deleteDatabase(path);
+    } catch (_) {}
   }
-  
-  Future<int> getTodayMRCount() async => _getDailyCountForCondition('MR');
-  Future<int> getTodayMSCount() async => _getDailyCountForCondition('MS');
-  Future<int> getTodayMVPCount() async => _getDailyCountForCondition('MVP');
 }
