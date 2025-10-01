@@ -22,6 +22,10 @@ class RecordPage extends StatefulWidget {
 }
 
 class _RecordPageState extends State<RecordPage> {
+  // --- Recording Duration Constant ---
+  static const int _recordingDurationInSeconds = 5;
+  // -----------------------------------
+
   final FlutterSoundRecorder _dataStreamer = FlutterSoundRecorder();
   final file_recorder.AudioRecorder _fileRecorder = file_recorder.AudioRecorder();
   final TfliteService _tfliteService = TfliteService();
@@ -116,7 +120,8 @@ class _RecordPageState extends State<RecordPage> {
 
   void _startAutoStopTimer() {
     _recordingTimer?.cancel();
-    const recordingDuration = Duration(seconds: 4);
+    // Use the constant for the duration
+    const recordingDuration = Duration(seconds: _recordingDurationInSeconds);
 
     _recordingTimer = Timer(recordingDuration, () {
       if (_isRecording && mounted) {
@@ -192,8 +197,9 @@ class _RecordPageState extends State<RecordPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Use the constant for the instruction text
     final String instructionText = _isRecording
-        ? "Recording... (stops in 4s)"
+        ? "Recording... (stops in $_recordingDurationInSeconds""s)"
         : "Tap to Start";
 
     return Scaffold(
@@ -277,7 +283,8 @@ class _RecordPageState extends State<RecordPage> {
           const SizedBox(height: 24),
           _buildGuidelineItem(Icons.mic_off_rounded, 'Ensure a quiet environment.'),
           _buildGuidelineItem(Icons.place_rounded, 'Place stethoscope at the mitral area (as shown).'),
-          _buildGuidelineItem(Icons.timer_rounded, 'The recording will last 4 seconds for a complete analysis.'),
+          // Use the constant for the guideline text
+          _buildGuidelineItem(Icons.timer_rounded, 'The recording will last $_recordingDurationInSeconds seconds for a complete analysis.'),
           _buildGuidelineItem(Icons.person_rounded, 'Ensure the patient remains still during recording.'),
         ],
       ),
@@ -329,8 +336,8 @@ class _RecordPageState extends State<RecordPage> {
                         ],
                         minY: -1.0,
                         maxY: 1.0,
-                        minX: _spots.first.x,
-                        maxX: _spots.last.x,
+                        minX: _spots.isNotEmpty ? _spots.first.x : 0,
+                        maxX: _spots.isNotEmpty ? _spots.last.x : 0,
                         lineTouchData: const LineTouchData(enabled: false),
                       ),
                     ),
@@ -369,7 +376,7 @@ class _RecordPageState extends State<RecordPage> {
       context: context,
       barrierDismissible: false,
       builder: (c) => AlertDialog(
-        backgroundColor: Colors.white, 
+        backgroundColor: Colors.white,
         title: const Text("Save Recording"),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -432,6 +439,7 @@ class _RecordPageState extends State<RecordPage> {
           recordedDate: DateTime.now(),
           classification: aiResult?['label'] ?? 'Error',
           confidence: aiResult?['confidence'] ?? 0.0,
+          probabilities: aiResult?['probabilities'] as Map<String, double>? ?? {},
         ),
       ));
     } catch (e) {

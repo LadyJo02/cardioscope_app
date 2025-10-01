@@ -2,8 +2,6 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:path_provider/path_provider.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
 /// Service class to run inference using the combined TFLite model.
@@ -43,8 +41,6 @@ class TfliteService {
     return floatList;
   }
   
-  /// =========== THIS IS THE MISSING FUNCTION ===========
-  /// Converts raw logit scores from the model into a probability distribution.
   List<double> _softmax(List<double> logits) {
     if (logits.isEmpty) return [];
     final maxLogit = logits.reduce(max);
@@ -52,7 +48,6 @@ class TfliteService {
     final sumExps = exps.reduce((a, b) => a + b);
     return exps.map((e) => e / sumExps).toList();
   }
-  /// ==========================================================
 
   Future<Map<String, dynamic>?> runInference({String? filePath}) async {
     if (!isReady) await loadModel();
@@ -62,8 +57,7 @@ class TfliteService {
     }
 
     try {
-      // Your teammate mentioned training on 5-second clips.
-      // 5 seconds @ 4000 Hz = 20000 samples.
+      // The model expects 5 seconds of audio at 4000 Hz = 20000 samples.
       const int expectedWaveformLength = 20000;
       Float32List waveform;
 
@@ -88,18 +82,13 @@ class TfliteService {
         return null;
       }
 
-      // Input must be List<List<double>> to avoid shape errors.
-      final input = [waveform.toList()]; 
-      
-      // Assume the combined model now only has ONE output (the logits).
+      final input = [waveform.toList()];
       final output = List.generate(1, (_) => List.filled(_labels.length, 0.0));
 
       _interpreter!.run(input, output);
 
-      // --- FIX: Apply softmax to the logits to get probabilities ---
       final logits = output[0];
       final probabilities = _softmax(logits);
-      // -----------------------------------------------------------
 
       final bestIndex =
           probabilities.indexWhere((p) => p == probabilities.reduce(max));
@@ -122,18 +111,6 @@ class TfliteService {
       debugPrint("❌ FATAL Error during inference: $e");
       debugPrint("Stacktrace:\n$st");
       return null;
-    }
-  }
-
-  Future<void> testBatch(List<String> assetFiles) async {
-    final tempDir = await getTemporaryDirectory();
-    for (final asset in assetFiles) {
-      final bytes = await rootBundle.load(asset);
-      final file = File("${tempDir.path}/${asset.split('/').last}");
-      await file.writeAsBytes(bytes.buffer.asUint8List());
-      debugPrint("🎧 Testing file: ${file.path}");
-      await runInference(filePath: file.path);
-      debugPrint("--------------------------------------------------");
     }
   }
 

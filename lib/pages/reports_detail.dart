@@ -1,7 +1,9 @@
 // lib/pages/reports_detail.dart
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -60,6 +62,12 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     return spots;
   }
 
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return "$minutes:$seconds";
+  }
+
   @override
   Widget build(BuildContext context) {
     final recordDate = widget.report['record_date'];
@@ -74,13 +82,23 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     final confidenceValue = widget.report['confidence'];
     String confidenceString = 'N/A';
     if (confidenceValue is num) {
-      confidenceString = '${(confidenceValue * 100).toStringAsFixed(1)}%';
+      confidenceString = '${(confidenceValue * 100).toStringAsFixed(2)}%';
     }
 
     final userId = widget.report['user_id'];
     final patientId = userId != null
         ? DatabaseHelper.instance.formatPatientId(userId as int)
         : 'N/A';
+
+    Map<String, double> probabilities = {};
+    final probabilitiesJson = widget.report['probabilities'] as String?;
+    if (probabilitiesJson != null) {
+      try {
+        probabilities = Map<String, double>.from(jsonDecode(probabilitiesJson));
+      } catch (e) {
+        debugPrint("Error decoding probabilities: $e");
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -95,7 +113,6 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
         padding: const EdgeInsets.all(16),
         child:
             Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          // Patient Details
           Card(
             color: Colors.white,
             elevation: 2,
@@ -123,8 +140,6 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
             ),
           ),
           const SizedBox(height: 16),
-
-          // Playback & Waveform
           Card(
             color: Colors.white,
             elevation: 2,
@@ -175,59 +190,17 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                StreamBuilder<PlayerState>(
-                  stream: _player.playerStateStream,
-                  builder: (context, snap) {
-                    final state = snap.data;
-                    final playing = state?.playing == true;
-                    final processingState = state?.processingState;
-                    IconData icon = Icons.play_arrow;
-                    if (playing) {
-                      icon = Icons.pause;
-                    } else if (processingState ==
-                        ProcessingState.completed) {
-                      icon = Icons.replay;
-                    }
-
-                    return Center(
-                      child: IconButton(
-                        iconSize: 48,
-                        icon: Icon(icon, color: const Color(0xFFC31C42)),
-                        onPressed: () async {
-                          try {
-                            if (playing) {
-                              await _player.pause();
-                            } else if (processingState ==
-                                ProcessingState.completed) {
-                              await _player.seek(Duration.zero);
-                              await _player.play();
-                            } else {
-                              await _player.play();
-                            }
-                          } catch (e) {
-                            if (!mounted) return;
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Playback error: $e')),
-                              );
-                            }
-                          }
-                        },
-                      ),
-                    );
-                  },
-                ),
+                _buildPlaybackControls(),
               ]),
             ),
           ),
           const SizedBox(height: 16),
-
-          // AI Analysis
           Card(
             color: Colors.white,
             elevation: 2,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+              borderRadius: BorderRadius.circular(12),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child:
@@ -241,10 +214,108 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                 _buildDetailRow('Classification:',
                     widget.report['diagnosis'] ?? 'Pending'),
                 _buildDetailRow('Confidence:', confidenceString),
+                if (probabilities.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  const Text("Detailed Breakdown:", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
+                  const SizedBox(height: 8),
+                  ...probabilities.entries.map((entry) {
+                    return _buildProbabilityRow(entry.key, entry.value);
+                  })
+                ]
               ]),
             ),
           ),
         ]),
+      ),
+    );
+  }
+
+  Widget _buildPlaybackControls() {
+    return StreamBuilder<PlayerState>(
+      stream: _player.playerStateStream,
+      builder: (context, snapshot) {
+        final playerState = snapshot.data;
+        final processingState = playerState?.processingState;
+        final playing = playerState?.playing ?? false;
+
+        IconData icon = Icons.play_arrow_rounded;
+        if (playing) {
+          icon = Icons.pause_rounded;
+        } else if (processingState == ProcessingState.completed) {
+          icon = Icons.replay_rounded;
+        }
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(icon, color: const Color(0xFFC31C42)),
+              iconSize: 48,
+              onPressed: () {
+                if (playing) {
+                  _player.pause();
+                } else if (processingState == ProcessingState.completed) {
+                  _player.seek(Duration.zero);
+                  _player.play();
+                } else {
+                  _player.play();
+                }
+              },
+            ),
+            Row(
+              children: [
+                StreamBuilder<Duration>(
+                  stream: _player.positionStream,
+                  builder: (context, snapshot) {
+                    final position = snapshot.data ?? Duration.zero;
+                    return Text(_formatDuration(position));
+                  },
+                ),
+                Expanded(
+                  child: StreamBuilder<Duration?>(
+                    stream: _player.durationStream,
+                    builder: (context, snapshot) {
+                      final duration = snapshot.data ?? Duration.zero;
+                      return Slider(
+                        value: _player.position.inMilliseconds.toDouble().clamp(0.0, duration.inMilliseconds.toDouble()),
+                        onChanged: (value) {
+                          _player.seek(Duration(milliseconds: value.toInt()));
+                        },
+                        min: 0.0,
+                        max: duration.inMilliseconds.toDouble(),
+                        activeColor: const Color(0xFFC31C42),
+                        inactiveColor: Colors.grey.shade300,
+                      );
+                    },
+                  ),
+                ),
+                Text(_formatDuration(_player.duration ?? Duration.zero)),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+  
+  Widget _buildProbabilityRow(String label, double value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        children: [
+          Expanded(flex: 2, child: Text(label, style: TextStyle(color: Colors.grey.shade700))),
+          Expanded(
+            flex: 5,
+            child: LinearProgressIndicator(
+              value: value,
+              backgroundColor: Colors.grey.shade300,
+              color: UIHelpers.getStatusColor(label),
+              minHeight: 12,
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+          Expanded(flex: 2, child: Text("${(value * 100).toStringAsFixed(2)}%", textAlign: TextAlign.end)),
+        ],
       ),
     );
   }

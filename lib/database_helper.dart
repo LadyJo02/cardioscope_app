@@ -23,7 +23,7 @@ class DatabaseHelper {
 
   Future _onCreate(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE users (
+      CREATE TABLE patient (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         age INTEGER,
@@ -47,6 +47,7 @@ class DatabaseHelper {
         record_id INTEGER,
         diagnosis TEXT,
         confidence REAL,
+        probabilities TEXT,
         analysis_date TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (record_id) REFERENCES heart_sound_records (id) ON DELETE CASCADE
       );
@@ -80,7 +81,7 @@ class DatabaseHelper {
     final result = await db.rawQuery('''
       SELECT u.id as user_id, u.name, u.age, u.gender,
              r.id as record_id, r.file_path, r.record_date,
-             a.diagnosis, a.confidence, a.analysis_date
+             a.diagnosis, a.confidence, a.probabilities, a.analysis_date
       FROM users u
       JOIN heart_sound_records r ON u.id = r.user_id
       JOIN mitral_valve_analysis a ON r.id = a.record_id

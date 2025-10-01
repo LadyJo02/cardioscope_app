@@ -29,19 +29,10 @@ Future<void> main() async {
     }
   }
 
-  // ✅ Run batch test ONCE before starting the app
+  // ✅ Pre-load the AI model for faster first-time use
+  //    (The test batch has been removed).
   final tflite = TfliteService();
   await tflite.loadModel();
-  await tflite.testBatch([
-    "assets/test_wavs/New_MR_002.wav", 
-    "assets/test_wavs/New_MR_015.wav", 
-    "assets/test_wavs/New_MS_003.wav", 
-    "assets/test_wavs/New_MS_011.wav", 
-    "assets/test_wavs/New_MVP_001.wav", 
-    "assets/test_wavs/New_MVP_013.wav", 
-    "assets/test_wavs/New_N_001.wav", 
-    "assets/test_wavs/New_N_019.wav", 
-  ]);
 
   // ✅ Then launch the app normally
   runApp(CardioScopeApp(userName: userName));
