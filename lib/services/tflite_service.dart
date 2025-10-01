@@ -6,50 +6,33 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
-/// Service class to run the TFLite preprocessing and classifier models.
+/// Service class to run inference using the combined TFLite model.
 class TfliteService {
   static final TfliteService _instance = TfliteService._internal();
   factory TfliteService() => _instance;
   TfliteService._internal();
 
-  Interpreter? _preprocessorInterpreter;
-  Interpreter? _classifierInterpreter;
+  Interpreter? _interpreter;
 
-  final String _preprocessorModelPath = "assets/models/preprocess_mel.tflite";
-  final String _classifierModelPath   = "assets/models/tcn_snn.tflite";
-  static const List<String> _labels   = ["MR", "MS", "MVP", "N"];
+  final String _modelPath = "assets/models/tcn_snn_full.tflite";
+  static const List<String> _labels = ["MR", "MS", "MVP", "N"];
 
-  bool get isReady =>
-      _preprocessorInterpreter != null && _classifierInterpreter != null;
+  bool get isReady => _interpreter != null;
 
-  // ==========================================================
-  // Load both models
-  // ==========================================================
   Future<void> loadModel() async {
     if (isReady) return;
     try {
-      debugPrint("🔎 Loading TFLite models…");
-
-      final pre = await Interpreter.fromAsset(_preprocessorModelPath);
-      final cls = await Interpreter.fromAsset(_classifierModelPath);
-
-      pre.allocateTensors();
-      cls.allocateTensors();
-
-      _preprocessorInterpreter = pre;
-      _classifierInterpreter   = cls;
-
-      debugPrint("✅ Both TFLite models loaded.");
+      debugPrint("🔎 Loading combined TFLite model…");
+      final interpreter = await Interpreter.fromAsset(_modelPath);
+      interpreter.allocateTensors();
+      _interpreter = interpreter;
+      debugPrint("✅ Combined model loaded successfully.");
     } catch (e, st) {
-      debugPrint("❌ Error loading TFLite models: $e");
+      debugPrint("❌ Error loading TFLite model: $e");
       debugPrint("Stacktrace: $st");
     }
   }
 
-  // ==========================================================
-  // Utility
-  // ==========================================================
-  /// Convert 16-bit PCM bytes to Float32 in range -1…1
   Float32List _pcm16ToFloat32List(Uint8List pcmBytes) {
     final byteData = ByteData.sublistView(pcmBytes);
     final sampleCount = pcmBytes.lengthInBytes ~/ 2;
@@ -59,34 +42,39 @@ class TfliteService {
     }
     return floatList;
   }
+  
+  /// =========== THIS IS THE MISSING FUNCTION ===========
+  /// Converts raw logit scores from the model into a probability distribution.
+  List<double> _softmax(List<double> logits) {
+    if (logits.isEmpty) return [];
+    final maxLogit = logits.reduce(max);
+    final exps = logits.map((x) => exp(x - maxLogit)).toList();
+    final sumExps = exps.reduce((a, b) => a + b);
+    return exps.map((e) => e / sumExps).toList();
+  }
+  /// ==========================================================
 
-  // ==========================================================
-  // Inference
-  // ==========================================================
   Future<Map<String, dynamic>?> runInference({String? filePath}) async {
     if (!isReady) await loadModel();
     if (!isReady) {
-      debugPrint("❌ Models are not loaded. Cannot run inference.");
+      debugPrint("❌ Model is not loaded. Cannot run inference.");
       return null;
     }
 
     try {
-      //------------------------------------------------------------------
-      // The new preprocessor expects 5 s of audio at 4 kHz → 20 000 samples
-      //------------------------------------------------------------------
+      // Your teammate mentioned training on 5-second clips.
+      // 5 seconds @ 4000 Hz = 20000 samples.
       const int expectedWaveformLength = 20000;
       Float32List waveform;
 
-      // Load wav file (from local filesystem or copied asset)
       if (filePath != null && await File(filePath).exists()) {
         final fileBytes = await File(filePath).readAsBytes();
         if (fileBytes.length <= 44) {
           debugPrint("❌ Error: WAV file too small.");
           return null;
         }
-        waveform = _pcm16ToFloat32List(fileBytes.sublist(44)); // skip 44-byte WAV header
+        waveform = _pcm16ToFloat32List(fileBytes.sublist(44));
 
-        // pad / crop to exactly 20 000 samples
         if (waveform.length < expectedWaveformLength) {
           final padded = Float32List(expectedWaveformLength);
           padded.setRange(0, waveform.length, waveform);
@@ -94,34 +82,33 @@ class TfliteService {
         } else if (waveform.length > expectedWaveformLength) {
           waveform = waveform.sublist(0, expectedWaveformLength);
         }
-        debugPrint("🟢 Input waveform loaded: ${waveform.length} samples.");
+        debugPrint("🟢 Input waveform ready: ${waveform.length} samples.");
       } else {
         debugPrint("❌ File not found: $filePath");
         return null;
       }
 
-      //------------------ Step 1: Preprocessor ------------------
-      final preInput  = [waveform]; // shape [1,20000]
-      final preOutput = List.generate(128, (_) => List<double>.filled(150, 0.0));
-      _preprocessorInterpreter!.run(preInput, preOutput);
+      // Input must be List<List<double>> to avoid shape errors.
+      final input = [waveform.toList()]; 
+      
+      // Assume the combined model now only has ONE output (the logits).
+      final output = List.generate(1, (_) => List.filled(_labels.length, 0.0));
 
-      //------------------ Step 2: Classifier --------------------
-      // Classifier has 2 outputs: [logits] and [softmax probabilities]
-      final clsInput = [preOutput]; // shape [1,128,150]
-      final Map<int, Object> outputs = {
-        0: List.generate(1, (_) => List.filled(_labels.length, 0.0)), // logits
-        1: List.generate(1, (_) => List.filled(_labels.length, 0.0)), // softmax
-      };
-      _classifierInterpreter!.runForMultipleInputs([clsInput], outputs);
+      _interpreter!.run(input, output);
 
-      final probabilities = (outputs[1] as List<List<double>>)[0];
+      // --- FIX: Apply softmax to the logits to get probabilities ---
+      final logits = output[0];
+      final probabilities = _softmax(logits);
+      // -----------------------------------------------------------
+
       final bestIndex =
           probabilities.indexWhere((p) => p == probabilities.reduce(max));
       final predictedLabel = _labels[bestIndex];
 
-      // Print full probability distribution
+      debugPrint("--- Analysis Results ---");
       for (int i = 0; i < _labels.length; i++) {
-        debugPrint("   ${_labels[i]}: ${(probabilities[i] * 100).toStringAsFixed(2)}%");
+        debugPrint(
+            "   ${_labels[i]}: ${(probabilities[i] * 100).toStringAsFixed(2)}%");
       }
       debugPrint("🏆 Predicted: $predictedLabel "
           "(Conf: ${(probabilities[bestIndex] * 100).toStringAsFixed(2)}%)");
@@ -138,38 +125,21 @@ class TfliteService {
     }
   }
 
-  // ==========================================================
-  // Batch test helper
-  // ==========================================================
   Future<void> testBatch(List<String> assetFiles) async {
     final tempDir = await getTemporaryDirectory();
-
     for (final asset in assetFiles) {
-      // Copy asset wav to a temp file
       final bytes = await rootBundle.load(asset);
       final file = File("${tempDir.path}/${asset.split('/').last}");
       await file.writeAsBytes(bytes.buffer.asUint8List());
-
       debugPrint("🎧 Testing file: ${file.path}");
-      final result = await runInference(filePath: file.path);
-
-      if (result != null) {
-        final probs = result['probabilities'] as Map<String, double>;
-        probs.forEach((label, prob) {
-          debugPrint("   $label: ${(prob * 100).toStringAsFixed(2)}%");
-        });
-        debugPrint("👉 Final Prediction: ${result['label']} "
-            "(Conf: ${(result['confidence'] * 100).toStringAsFixed(2)}%)");
-        debugPrint("--------------------------------------------------");
-      }
+      await runInference(filePath: file.path);
+      debugPrint("--------------------------------------------------");
     }
   }
 
   void dispose() {
-    _preprocessorInterpreter?.close();
-    _classifierInterpreter?.close();
-    _preprocessorInterpreter = null;
-    _classifierInterpreter = null;
-    debugPrint("✅ TFLite interpreters disposed.");
+    _interpreter?.close();
+    _interpreter = null;
+    debugPrint("✅ TFLite interpreter disposed.");
   }
 }

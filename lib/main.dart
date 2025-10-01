@@ -33,16 +33,14 @@ Future<void> main() async {
   final tflite = TfliteService();
   await tflite.loadModel();
   await tflite.testBatch([
-    "assets/test_wavs/sample1_MR_001.wav", 
-    "assets/test_wavs/sample2_MR_012.wav", 
-    "assets/test_wavs/sample3_MR_035.wav", 
-    "assets/test_wavs/sample4_MS_042.wav", 
-    "assets/test_wavs/sample5_MS_062.wav", 
-    "assets/test_wavs/sample6_MVP_045.wav", 
-    "assets/test_wavs/sample7_MVP_054.wav", 
-    "assets/test_wavs/sample8_N_119.wav", 
-    "assets/test_wavs/sample9_N_174.wav", 
-    "assets/test_wavs/sample10_N_197.wav", 
+    "assets/test_wavs/New_MR_002.wav", 
+    "assets/test_wavs/New_MR_015.wav", 
+    "assets/test_wavs/New_MS_003.wav", 
+    "assets/test_wavs/New_MS_011.wav", 
+    "assets/test_wavs/New_MVP_001.wav", 
+    "assets/test_wavs/New_MVP_013.wav", 
+    "assets/test_wavs/New_N_001.wav", 
+    "assets/test_wavs/New_N_019.wav", 
   ]);
 
   // ✅ Then launch the app normally

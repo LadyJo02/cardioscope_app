@@ -299,6 +299,7 @@ class _DashboardPageState extends State<DashboardPage>
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: ListTile(
         leading: UIHelpers.getStatusIndicator(p['diagnosis'], size: 12.0),
+        horizontalTitleGap: 12.0,
         title: Text(
           '$formattedId – ${p['name'] ?? 'Unnamed'}',
           style: const TextStyle(fontWeight: FontWeight.w600),
