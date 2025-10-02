@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:cardioscope_app/utils/app_colors.dart';
+import 'package:flutter/material.dart'; 
 
 class QuickStartGuidePage extends StatelessWidget {
   const QuickStartGuidePage({super.key});
@@ -8,7 +9,7 @@ class QuickStartGuidePage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Quick Start Guide', style: TextStyle(color: Colors.white)),
-        backgroundColor: const Color(0xFFC31C42),
+        backgroundColor: AppColors.primary,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: ListView(

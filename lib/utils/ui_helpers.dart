@@ -1,24 +1,24 @@
+// lib/utils/ui_helpers.dart
 import 'package:flutter/material.dart';
 
-// A helper class for consistent UI elements like status indicators.
+import 'app_colors.dart';
+
 class UIHelpers {
-  /// Returns a color based on the classification string.
   static Color getStatusColor(String? classification) {
     switch (classification) {
       case 'Normal':
-        return Colors.green; // Normal = green
+        return AppColors.primary; // healthy -> primary dark teal
       case 'MR':
-        return Colors.orange; // MR = orange
+        return AppColors.accent; // MR -> teal accent
       case 'MS':
-        return Colors.purple; // MS = purple
+        return AppColors.primaryLight; // MS -> lighter blue
       case 'MVP':
-        return Colors.green; // MVP = green
-      default: // Pending or null
-        return Colors.grey;
+        return AppColors.surfaceLight; // MVP -> pale mint for visual distinction
+      default:
+        return Colors.grey; // pending or unknown
     }
   }
 
-  /// Returns an Icon widget with the appropriate status color.
   static Widget getStatusIndicator(String? classification, {double size = 12.0}) {
     return Icon(
       Icons.circle,

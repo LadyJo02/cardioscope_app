@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -96,7 +97,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFFC31C42),
+        backgroundColor: AppColors.primary,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Text(
           'Report for ${widget.report['name'] ?? 'Unnamed'}',
@@ -174,7 +175,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                               LineChartBarData(
                                 spots: snapshot.data!,
                                 isCurved: false,
-                                color: const Color(0xFFC31C42),
+                                color: AppColors.primary,
                                 barWidth: 1.2,
                                 dotData: const FlDotData(show: false),
                               ),
@@ -246,7 +247,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              icon: Icon(icon, color: const Color(0xFFC31C42)),
+              icon: Icon(icon, color: AppColors.primary),
               iconSize: 48,
               onPressed: () {
                 if (playing) {
@@ -282,7 +283,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                         },
                         min: 0.0,
                         max: duration.inMilliseconds.toDouble(),
-                        activeColor: const Color(0xFFC31C42),
+                        activeColor: AppColors.primary,
                         inactiveColor: Colors.grey.shade300,
                       );
                     },

@@ -1,6 +1,7 @@
 // lib/pages/dashboard.dart
 import 'package:cardioscope_app/database_helper.dart';
 import 'package:cardioscope_app/pages/reports_detail.dart';
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -118,7 +119,7 @@ class _DashboardPageState extends State<DashboardPage>
       },
       child: Scaffold(
         appBar: AppBar(
-          backgroundColor: const Color(0xFFC31C42),
+          backgroundColor: AppColors.primary,
           title: const Text('Dashboard', style: TextStyle(color: Colors.white)),
           actions: [
             IconButton(
@@ -212,7 +213,7 @@ class _DashboardPageState extends State<DashboardPage>
                   TextSpan(
                       text: practitionerName,
                       style: const TextStyle(
-                          color: Color(0xFFC31C42),
+                          color: AppColors.primary,
                           fontWeight: FontWeight.bold)),
                   const TextSpan(
                       text: '!', style: TextStyle(color: Colors.black87)),
@@ -280,7 +281,7 @@ class _DashboardPageState extends State<DashboardPage>
                 .then((_) => _loadData()),
             child: const Text('View All',
                 style: TextStyle(
-                    color: Color(0xFFC31C42), fontWeight: FontWeight.bold)),
+                    color: AppColors.primary, fontWeight: FontWeight.bold)),
           ),
       ],
     );

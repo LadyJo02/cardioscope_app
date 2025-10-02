@@ -1,3 +1,4 @@
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:flutter/material.dart';
 
 class FaqPage extends StatelessWidget {
@@ -8,7 +9,7 @@ class FaqPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('FAQ & Support', style: TextStyle(color: Colors.white)),
-        backgroundColor: const Color(0xFFC31C42),
+        backgroundColor: AppColors.primary,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       backgroundColor: Colors.white, 
@@ -67,7 +68,7 @@ class FaqItem extends StatelessWidget {
         child: ExpansionTile(
           tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          iconColor: Theme.of(context).primaryColor,
+          iconColor: AppColors.primary,
           collapsedIconColor: Colors.grey,
           title: Text(
             question,

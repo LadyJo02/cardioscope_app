@@ -8,7 +8,8 @@ import 'pages/login.dart'; // ✅ new login page
 import 'pages/record.dart';
 import 'pages/reports.dart';
 import 'pages/settings.dart';
-import 'services/tflite_service.dart'; 
+import 'services/tflite_service.dart';
+import 'utils/app_colors.dart'; // ✅ centralized color palette
 
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 
@@ -50,28 +51,49 @@ class CardioScopeApp extends StatelessWidget {
         return MaterialApp(
           title: 'CardioScope',
           debugShowCheckedModeBanner: false,
-          
           themeMode: mode,
+
+          // ✅ Light theme
           theme: ThemeData(
             brightness: Brightness.light,
-            scaffoldBackgroundColor: const Color(0xFFF5F5F5),
-            primaryColor: const Color(0xFFC31C42),
+            scaffoldBackgroundColor: AppColors.scaffoldBackground,
+            primaryColor: AppColors.primary,
             colorScheme: ColorScheme.fromSeed(
-              seedColor: const Color(0xFFC31C42),
+              seedColor: AppColors.primary,
               brightness: Brightness.light,
+              secondary: AppColors.accent,
+            ),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+            floatingActionButtonTheme: const FloatingActionButtonThemeData(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
             ),
             useMaterial3: true,
           ),
+
+          // ✅ Dark theme
           darkTheme: ThemeData(
             brightness: Brightness.dark,
-            primaryColor: const Color(0xFFC31C42),
+            primaryColor: AppColors.primary,
             colorScheme: ColorScheme.fromSeed(
-              seedColor: const Color(0xFFC31C42),
+              seedColor: AppColors.primary,
               brightness: Brightness.dark,
+              secondary: AppColors.accent,
+            ),
+            appBarTheme: const AppBarTheme(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+            floatingActionButtonTheme: const FloatingActionButtonThemeData(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
             ),
             useMaterial3: true,
           ),
-          
+
           // ✅ NEW INITIAL ROUTE LOGIC
           home: practitionerId == null
               ? const LoginPage()
@@ -80,7 +102,8 @@ class CardioScopeApp extends StatelessWidget {
           routes: {
             '/record': (context) => const RecordPage(),
             '/reports': (context) => const ReportsPage(),
-            '/settings': (context) => SettingsPage(themeNotifier: themeNotifier),
+            '/settings': (context) =>
+                SettingsPage(themeNotifier: themeNotifier),
           },
         );
       },
@@ -138,7 +161,7 @@ class _MainNavigationState extends State<MainNavigation> {
           onPressed: () {
             Navigator.pushNamed(context, '/record');
           },
-          backgroundColor: Theme.of(context).primaryColor,
+          backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
           elevation: 8.0,
           shape: const CircleBorder(),
@@ -166,7 +189,7 @@ class _MainNavigationState extends State<MainNavigation> {
 
   Widget _buildNavItem(IconData icon, String label, int index) {
     final isSelected = _selectedIndex == index;
-    final color = isSelected ? Theme.of(context).primaryColor : Colors.grey;
+    final color = isSelected ? AppColors.primary : Colors.grey;
 
     return InkWell(
       onTap: () => _onItemTapped(index),

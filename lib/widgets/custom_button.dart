@@ -1,3 +1,4 @@
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:flutter/material.dart';
 
 /// Shared constants for buttons
@@ -31,7 +32,7 @@ class CustomButton extends StatelessWidget {
       ),
       onPressed: onPressed,
       style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFC31C42),
+        backgroundColor: AppColors.primary,
         minimumSize: const Size(double.infinity, 50),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),

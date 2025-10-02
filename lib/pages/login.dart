@@ -1,4 +1,5 @@
 // lib/pages/login.dart
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -113,8 +114,8 @@ class _LoginPageState extends State<LoginPage>
             const SizedBox(height: 20),
             TabBar(
               controller: _tabController,
-              indicatorColor: const Color(0xFFC31C42),
-              labelColor: const Color(0xFFC31C42),
+              indicatorColor: AppColors.primary,
+              labelColor: AppColors.primary,
               unselectedLabelColor: Colors.grey,
               tabs: const [
                 Tab(text: "Login"),
@@ -175,7 +176,7 @@ class _LoginPageState extends State<LoginPage>
           ElevatedButton(
             onPressed: _login,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFC31C42),
+              backgroundColor: AppColors.primary,
               padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 40),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -223,7 +224,7 @@ class _LoginPageState extends State<LoginPage>
           ElevatedButton(
             onPressed: _register,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFC31C42),
+              backgroundColor: AppColors.primary,
               padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 40),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),

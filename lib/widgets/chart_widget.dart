@@ -1,4 +1,6 @@
 import 'dart:math';
+
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
@@ -30,7 +32,7 @@ class ChartWidget extends StatelessWidget {
                   .map((spot) => LineTooltipItem(
                         '${spot.y.toInt()}',
                         const TextStyle(
-                          color: Color(0xFFC31C42),
+                          color: AppColors.primary,
                           fontWeight: FontWeight.bold,
                         ),
                       ))
@@ -112,13 +114,13 @@ class ChartWidget extends StatelessWidget {
           LineChartBarData(
             spots: spots,
             isCurved: true,
-            color: const Color(0xFFC31C42),
+            color: AppColors.primary,
             barWidth: 4,
             isStrokeCapRound: true,
             dotData: const FlDotData(show: false),
             belowBarData: BarAreaData(
               show: true,
-              color: const Color(0xFFC31C42).withValues(alpha: 0.2),
+              color: AppColors.primary.withValues(alpha: 0.2),
             ),
           ),
         ],

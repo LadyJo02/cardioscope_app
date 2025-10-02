@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cardioscope_app/services/tflite_service.dart';
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/widgets/custom_button.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -210,7 +211,7 @@ class _RecordPageState extends State<RecordPage> {
       appBar: AppBar(
         title: const Text('Record Heart Sound',
             style: TextStyle(color: Colors.white)),
-        backgroundColor: const Color(0xFFC31C42),
+        backgroundColor: AppColors.primary,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Padding(
@@ -232,10 +233,10 @@ class _RecordPageState extends State<RecordPage> {
                   height: ButtonConstants.micButtonSize,
                   decoration: BoxDecoration(
                     color:
-                        _isRecording ? Colors.white : const Color(0xFFC31C42),
+                        _isRecording ? Colors.white : AppColors.primary,
                     shape: BoxShape.circle,
                     border: _isRecording
-                        ? Border.all(color: const Color(0xFFC31C42), width: 4)
+                        ? Border.all(color: AppColors.primary, width: 4)
                         : null,
                     boxShadow: [
                       BoxShadow(
@@ -247,11 +248,11 @@ class _RecordPageState extends State<RecordPage> {
                   child: Center(
                     child: _isProcessing
                         ? const CircularProgressIndicator(
-                            color: Color(0xFFC31C42))
+                            color: AppColors.primary)
                         : Icon(
                             _isRecording ? Icons.stop_rounded : Icons.mic,
                             color: _isRecording
-                                ? const Color(0xFFC31C42)
+                                ? AppColors.primary
                                 : Colors.white,
                             size: 50),
                   ),
@@ -337,7 +338,7 @@ class _RecordPageState extends State<RecordPage> {
                           LineChartBarData(
                             spots: _spots,
                             isCurved: false,
-                            color: const Color(0xFFC31C42),
+                            color: AppColors.primary,
                             barWidth: 1.5,
                             dotData: const FlDotData(show: false),
                           ),
@@ -366,7 +367,7 @@ class _RecordPageState extends State<RecordPage> {
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
         children: [
-          Icon(icon, color: const Color(0xFFC31C42), size: 24),
+          Icon(icon, color: AppColors.primary, size: 24),
           const SizedBox(width: 16),
           Expanded(
               child: Text(text,

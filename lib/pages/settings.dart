@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:audio_session/audio_session.dart';
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -72,7 +73,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings', style: TextStyle(color: Colors.white)),
-        backgroundColor: const Color(0xFFC31C42),
+        backgroundColor: AppColors.primary,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: ListView(
@@ -126,7 +127,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           _buildSettingsTile(
             icon: Icons.delete_sweep_outlined,
-            iconColor: Colors.red.shade700,
+            iconColor: const Color(0xFF023F40),
             title: 'Clear Cache',
             onTap: () => _showConfirmationDialog(
               context,
@@ -164,7 +165,7 @@ class _SettingsPageState extends State<SettingsPage> {
           const Divider(),
           _buildSettingsTile(
             icon: Icons.logout,
-            iconColor: Colors.red.shade700,
+            iconColor: const Color(0xFF023F40),
             title: 'Logout',
             onTap: () => _showConfirmationDialog(
               context,
@@ -260,7 +261,7 @@ class _SettingsPageState extends State<SettingsPage> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor:const Color(0xFF023F40)),
             onPressed: () {
               Navigator.of(dialogContext).pop();
               onConfirm();

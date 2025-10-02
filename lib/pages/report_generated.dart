@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -116,7 +117,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       appBar: AppBar(
         title: Text("Analysis for ${widget.patientName}",
             style: const TextStyle(color: Colors.white)),
-        backgroundColor: const Color(0xFFC31C42),
+        backgroundColor: AppColors.primary,
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(), // ✅ just exit page
@@ -199,7 +200,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                               LineChartBarData(
                                   spots: snapshot.data!,
                                   isCurved: false,
-                                  color: const Color(0xFFC31C42),
+                                  color: AppColors.primary,
                                   barWidth: 1,
                                   dotData: const FlDotData(show: false))
                             ],
@@ -259,7 +260,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
         },
         icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
         label: const Text("Export PDF", style: TextStyle(color: Colors.white)),
-        backgroundColor: const Color(0xFFC31C42),
+        backgroundColor: AppColors.primary,
       ),
     );
   }
@@ -283,7 +284,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              icon: Icon(icon, color: const Color(0xFFC31C42)),
+              icon: Icon(icon, color: AppColors.primary),
               iconSize: 48,
               onPressed: () {
                 if (playing) {
@@ -319,7 +320,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                         },
                         min: 0.0,
                         max: duration.inMilliseconds.toDouble(),
-                        activeColor: const Color(0xFFC31C42),
+                        activeColor: AppColors.primary,
                         inactiveColor: Colors.grey.shade300,
                       );
                     },
