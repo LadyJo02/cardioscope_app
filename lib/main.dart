@@ -1,10 +1,10 @@
 // lib/main.dart
-import 'package:cardioscope_app/pages/profile_setup.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'pages/dashboard.dart';
+import 'pages/login.dart'; // ✅ new login page
 import 'pages/record.dart';
 import 'pages/reports.dart';
 import 'pages/settings.dart';
@@ -19,7 +19,9 @@ Future<void> main() async {
   final prefs = await SharedPreferences.getInstance();
   final isDarkMode = prefs.getBool('isDarkMode') ?? false;
   themeNotifier.value = isDarkMode ? ThemeMode.dark : ThemeMode.light;
-  final String? userName = prefs.getString('userName');
+
+  // ✅ Read practitioner_id instead of userName
+  final int? practitionerId = prefs.getInt("practitioner_id");
 
   // ✅ Request storage permission
   final asked = prefs.getBool('storagePermissionAsked') ?? false;
@@ -30,17 +32,15 @@ Future<void> main() async {
   }
 
   // ✅ Pre-load the AI model for faster first-time use
-  //    (The test batch has been removed).
   final tflite = TfliteService();
   await tflite.loadModel();
 
-  // ✅ Then launch the app normally
-  runApp(CardioScopeApp(userName: userName));
+  runApp(CardioScopeApp(practitionerId: practitionerId));
 }
 
 class CardioScopeApp extends StatelessWidget {
-  final String? userName;
-  const CardioScopeApp({super.key, this.userName});
+  final int? practitionerId;
+  const CardioScopeApp({super.key, this.practitionerId});
 
   @override
   Widget build(BuildContext context) {
@@ -72,9 +72,9 @@ class CardioScopeApp extends StatelessWidget {
             useMaterial3: true,
           ),
           
-          // **CORRECT INITIAL ROUTE LOGIC**
-          home: userName == null || userName!.isEmpty
-              ? const ProfileSetupPage()
+          // ✅ NEW INITIAL ROUTE LOGIC
+          home: practitionerId == null
+              ? const LoginPage()
               : const MainNavigation(),
 
           routes: {
@@ -88,7 +88,7 @@ class CardioScopeApp extends StatelessWidget {
   }
 }
 
-// MainNavigation class remains the same
+// ✅ MainNavigation unchanged, only uses Dashboard + Reports
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
 
@@ -98,8 +98,6 @@ class MainNavigation extends StatefulWidget {
 
 class _MainNavigationState extends State<MainNavigation> {
   int _selectedIndex = 0;
-
-  // **ADD A PAGE CONTROLLER FOR SMOOTH NAVIGATION**
   final PageController _pageController = PageController();
 
   final List<Widget> _pages = const [
@@ -110,7 +108,6 @@ class _MainNavigationState extends State<MainNavigation> {
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
-      // Animate to the page
       _pageController.animateToPage(
         index,
         duration: const Duration(milliseconds: 300),
@@ -128,13 +125,10 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // **USE PAGEVIEW TO KEEP PAGE STATE**
       body: PageView(
         controller: _pageController,
         onPageChanged: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
+          setState(() => _selectedIndex = index);
         },
         children: _pages,
       ),
@@ -162,7 +156,7 @@ class _MainNavigationState extends State<MainNavigation> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: <Widget>[
             _buildNavItem(Icons.dashboard_rounded, 'Dashboard', 0),
-            const SizedBox(width: 80), // space for the FAB notch
+            const SizedBox(width: 80),
             _buildNavItem(Icons.analytics_rounded, 'Results', 1),
           ],
         ),

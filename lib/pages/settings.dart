@@ -4,10 +4,9 @@ import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// FIX: Add all necessary imports
 import '../main.dart' show themeNotifier;
 import 'faq_page.dart';
-import 'profile_setup.dart';
+import 'login.dart'; // ✅ use login instead of profile setup
 import 'quick_start_guide.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -19,14 +18,12 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  // State variables
   String _selectedLanguage = 'English';
   bool _isDataSyncOn = true;
   StreamSubscription<Set<AudioDevice>>? _devicesSubscription;
   bool _isUsbMicConnected = false;
   String _deviceStatusText = 'Please connect the CardioScope receiver.';
 
-  // Placeholder values
   final String _storageUsed = "128.5 MB";
   final String _appVersion = "1.0.0";
 
@@ -48,7 +45,8 @@ class _SettingsPageState extends State<SettingsPage> {
   void _checkConnectedDevices(List<AudioDevice> devices) {
     final usbDevice = devices.firstWhere(
       (d) => d.name.toLowerCase().contains('usb'),
-      orElse: () => AudioDevice(id: '', name: '', type: AudioDeviceType.unknown, isInput: false, isOutput: false),
+      orElse: () => AudioDevice(
+          id: '', name: '', type: AudioDeviceType.unknown, isInput: false, isOutput: false),
     );
     if (mounted) {
       setState(() {
@@ -165,22 +163,22 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const Divider(),
           _buildSettingsTile(
-            icon: Icons.person_remove_outlined,
+            icon: Icons.logout,
             iconColor: Colors.red.shade700,
-            title: 'Reset User Profile',
+            title: 'Logout',
             onTap: () => _showConfirmationDialog(
               context,
-              title: 'Confirm Reset',
-              content: 'Are you sure you want to clear your user profile? You will be asked to enter your name again.',
-              confirmText: 'Reset',
-              onConfirm: () => _resetAndGoToSetup(context),
+              title: 'Confirm Logout',
+              content: 'Are you sure you want to log out?',
+              confirmText: 'Logout',
+              onConfirm: () => _logoutAndGoToLogin(context),
             ),
           ),
         ],
       ),
     );
   }
-  
+
   void _showLanguageDialog() {
     showDialog(
       context: context,
@@ -212,8 +210,6 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
-
-  // --- Other Helper Widgets ---
 
   Widget _buildSectionHeader(String title, ThemeData theme) {
     return Padding(
@@ -276,12 +272,13 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Future<void> _resetAndGoToSetup(BuildContext context) async {
+  Future<void> _logoutAndGoToLogin(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('userName');
+    await prefs.remove('practitioner_id');
+    await prefs.remove('practitioner_name');
     if (context.mounted) {
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const ProfileSetupPage()),
+        MaterialPageRoute(builder: (context) => const LoginPage()),
         (route) => false,
       );
     }

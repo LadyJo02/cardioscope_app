@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -165,7 +166,9 @@ class DatabaseHelper {
     try {
       await deleteDatabase(path);
       _database = null;
-      print("Database deleted.");
+      if (kDebugMode) {
+        print("Database deleted.");
+      }
     } catch (_) {}
   }
 }

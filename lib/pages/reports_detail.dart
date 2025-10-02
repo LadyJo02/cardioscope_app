@@ -74,20 +74,14 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     String dateString = 'N/A';
     if (recordDate is String) {
       try {
-        dateString = DateFormat('MMMM d, yyyy HH:mm')
-            .format(DateTime.parse(recordDate));
+        dateString =
+            DateFormat('MMMM d, yyyy HH:mm').format(DateTime.parse(recordDate));
       } catch (_) {}
     }
 
-    final confidenceValue = widget.report['confidence'];
-    String confidenceString = 'N/A';
-    if (confidenceValue is num) {
-      confidenceString = '${(confidenceValue * 100).toStringAsFixed(2)}%';
-    }
-
-    final userId = widget.report['user_id'];
-    final patientId = userId != null
-        ? DatabaseHelper.instance.formatPatientId(userId as int)
+    final patientId = widget.report['patient_id'];
+    final patientIdFormatted = patientId != null
+        ? DatabaseHelper.instance.formatPatientId(patientId as int)
         : 'N/A';
 
     Map<String, double> probabilities = {};
@@ -111,118 +105,121 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child:
-            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Card(
             color: Colors.white,
             elevation: 2,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child:
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Patient Details',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold)),
-                const Divider(height: 20),
-                _buildDetailRow('Patient ID:', patientId),
-                _buildDetailRow('Name:', widget.report['name'] ?? 'Unnamed'),
-                _buildDetailRow(
-                    'Age:', widget.report['age']?.toString() ?? 'N/A'),
-                _buildDetailRow('Gender:', widget.report['gender'] ?? 'N/A'),
-                _buildDetailRow('File:',
-                    (widget.report['file_path'] ?? '').split('/').last),
-                _buildDetailRow('Recorded:', dateString),
-              ]),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Patient Details',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.bold)),
+                    const Divider(height: 20),
+                    _buildDetailRow('Patient ID:', patientIdFormatted),
+                    _buildDetailRow('Name:', widget.report['name'] ?? 'Unnamed'),
+                    _buildDetailRow(
+                        'Age:', widget.report['age']?.toString() ?? 'N/A'),
+                    _buildDetailRow('Gender:', widget.report['gender'] ?? 'N/A'),
+                    _buildDetailRow('File:',
+                        (widget.report['file_path'] ?? '').split('/').last),
+                    _buildDetailRow('Recorded:', dateString),
+                  ]),
             ),
           ),
           const SizedBox(height: 16),
           Card(
             color: Colors.white,
             elevation: 2,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child:
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Playback & Waveform',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold)),
-                const Divider(height: 20),
-                SizedBox(
-                  height: 140,
-                  child: FutureBuilder<List<FlSpot>>(
-                    future: _waveformFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState ==
-                          ConnectionState.waiting) {
-                        return const Center(
-                            child: CircularProgressIndicator());
-                      }
-                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                        return const Center(
-                            child: Text('No waveform available'));
-                      }
-                      return LineChart(LineChartData(
-                        titlesData: const FlTitlesData(show: false),
-                        gridData: const FlGridData(show: false),
-                        borderData: FlBorderData(show: false),
-                        minY: -1,
-                        maxY: 1,
-                        lineBarsData: [
-                          LineChartBarData(
-                            spots: snapshot.data!,
-                            isCurved: false,
-                            color: const Color(0xFFC31C42),
-                            barWidth: 1.2,
-                            dotData: const FlDotData(show: false),
-                          ),
-                        ],
-                        lineTouchData: const LineTouchData(enabled: false),
-                      ));
-                    },
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _buildPlaybackControls(),
-              ]),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Playback & Waveform',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.bold)),
+                    const Divider(height: 20),
+                    SizedBox(
+                      height: 140,
+                      child: FutureBuilder<List<FlSpot>>(
+                        future: _waveformFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                                child: CircularProgressIndicator());
+                          }
+                          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                            return const Center(
+                                child: Text('No waveform available'));
+                          }
+                          return LineChart(LineChartData(
+                            titlesData: const FlTitlesData(show: false),
+                            gridData: const FlGridData(show: false),
+                            borderData: FlBorderData(show: false),
+                            minY: -1,
+                            maxY: 1,
+                            lineBarsData: [
+                              LineChartBarData(
+                                spots: snapshot.data!,
+                                isCurved: false,
+                                color: const Color(0xFFC31C42),
+                                barWidth: 1.2,
+                                dotData: const FlDotData(show: false),
+                              ),
+                            ],
+                            lineTouchData: const LineTouchData(enabled: false),
+                          ));
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildPlaybackControls(),
+                  ]),
             ),
           ),
           const SizedBox(height: 16),
           Card(
             color: Colors.white,
             elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child:
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('AI Analysis',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold)),
-                const Divider(height: 20),
-                _buildDetailRow('Classification:',
-                    widget.report['diagnosis'] ?? 'Pending'),
-                _buildDetailRow('Confidence:', confidenceString),
-                if (probabilities.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  const Text("Detailed Breakdown:", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
-                  const SizedBox(height: 8),
-                  ...probabilities.entries.map((entry) {
-                    return _buildProbabilityRow(entry.key, entry.value);
-                  })
-                ]
-              ]),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('AI Analysis',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.bold)),
+                    const Divider(height: 20),
+                    _buildDetailRow(
+                        'Classification:', widget.report['diagnosis'] ?? 'Pending'),
+                    if (probabilities.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      const Text("Detailed Breakdown:",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black54)),
+                      const SizedBox(height: 8),
+                      ...probabilities.entries.map((entry) {
+                        return _buildProbabilityRow(entry.key, entry.value);
+                      })
+                    ]
+                  ]),
             ),
           ),
         ]),
@@ -277,7 +274,9 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                     builder: (context, snapshot) {
                       final duration = snapshot.data ?? Duration.zero;
                       return Slider(
-                        value: _player.position.inMilliseconds.toDouble().clamp(0.0, duration.inMilliseconds.toDouble()),
+                        value: _player.position.inMilliseconds
+                            .toDouble()
+                            .clamp(0.0, duration.inMilliseconds.toDouble()),
                         onChanged: (value) {
                           _player.seek(Duration(milliseconds: value.toInt()));
                         },
@@ -297,13 +296,16 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       },
     );
   }
-  
+
   Widget _buildProbabilityRow(String label, double value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
         children: [
-          Expanded(flex: 2, child: Text(label, style: TextStyle(color: Colors.grey.shade700))),
+          Expanded(
+              flex: 2,
+              child:
+                  Text(label, style: TextStyle(color: Colors.grey.shade700))),
           Expanded(
             flex: 5,
             child: LinearProgressIndicator(
@@ -314,7 +316,10 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
               borderRadius: BorderRadius.circular(6),
             ),
           ),
-          Expanded(flex: 2, child: Text("${(value * 100).toStringAsFixed(2)}%", textAlign: TextAlign.end)),
+          Expanded(
+              flex: 2,
+              child: Text("${(value * 100).toStringAsFixed(2)}%",
+                  textAlign: TextAlign.end)),
         ],
       ),
     );

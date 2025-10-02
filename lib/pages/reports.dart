@@ -1,19 +1,24 @@
+// lib/pages/reports.dart
 import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../database_helper.dart';
 import 'reports_detail.dart';
 
 class ReportsPage extends StatefulWidget {
   const ReportsPage({super.key});
+
   @override
   State<ReportsPage> createState() => _ReportsPageState();
 }
 
-class _ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClientMixin {
+class _ReportsPageState extends State<ReportsPage>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
+
   final db = DatabaseHelper.instance;
   List<Map<String, dynamic>> reports = [];
 
@@ -24,7 +29,11 @@ class _ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClient
   }
 
   Future<void> _load() async {
-    final data = await db.getAllReports();
+    final prefs = await SharedPreferences.getInstance();
+    final practitionerId = prefs.getInt('practitioner_id');
+    if (practitionerId == null) return;
+
+    final data = await db.getAllReports(practitionerId);
     if (mounted) setState(() => reports = data);
   }
 
@@ -46,9 +55,9 @@ class _ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClient
                 itemCount: reports.length,
                 itemBuilder: (_, i) {
                   final r = reports[i];
-                  final userId = r['user_id'] as int?;
-                  final patientId = userId != null
-                      ? db.formatPatientId(userId)
+                  final patientId = r['patient_id'] as int?;
+                  final patientIdFormatted = patientId != null
+                      ? db.formatPatientId(patientId)
                       : 'N/A';
 
                   String dateString = '';
@@ -64,22 +73,26 @@ class _ReportsPageState extends State<ReportsPage> with AutomaticKeepAliveClient
                     color: Colors.white,
                     elevation: 2,
                     margin: const EdgeInsets.symmetric(vertical: 8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                     child: ListTile(
-                      leading: UIHelpers.getStatusIndicator(r['diagnosis'], size: 12.0),
-                      tileColor: Colors.transparent,
-                      splashColor: Colors.transparent, 
+                      leading: UIHelpers.getStatusIndicator(
+                          r['diagnosis'], size: 12.0),
                       title: Text(
                         '${r['name'] ?? 'Unnamed'}',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                       subtitle: Text(
-                        'ID: $patientId • ${r['diagnosis'] ?? 'Pending'} • $dateString',
+                        'ID: $patientIdFormatted • ${r['diagnosis'] ?? 'Pending'} • $dateString',
                       ),
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => ReportDetailPage(report: r)),
-                      ),
+                      onTap: () async {
+                        final updated = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ReportDetailPage(report: r)),
+                        );
+                        if (updated == true) _load(); // refresh if updated
+                      },
                     ),
                   );
                 },

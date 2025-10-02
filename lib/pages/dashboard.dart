@@ -21,7 +21,7 @@ class _DashboardPageState extends State<DashboardPage>
 
   // State variables
   String greeting = "Good day";
-  String userName = "Health Practitioner";
+  String practitionerName = "Health Practitioner";
   int totalPatients = 0;
   int totalThisWeek = 0;
 
@@ -49,27 +49,21 @@ class _DashboardPageState extends State<DashboardPage>
     } else {
       greeting = "Good evening";
     }
+
     final prefs = await SharedPreferences.getInstance();
-    final savedName = prefs.getString('userName');
-    if (savedName != null && savedName.trim().isNotEmpty) {
-      userName = savedName.trim();
-    }
+    practitionerName = prefs.getString('practitioner_name') ?? "Health Practitioner";
+
     if (mounted) setState(() {});
   }
 
   Future<void> _loadData() async {
     if (!mounted) return;
 
-    final results = await Future.wait([
-      db.getAllReports(),
-      // TODO: implement these helper queries in db if needed
-      Future.value(0), // today screenings placeholder
-      Future.value(0), // today MR
-      Future.value(0), // today MS
-      Future.value(0), // today MVP
-    ]);
+    final prefs = await SharedPreferences.getInstance();
+    final practitionerId = prefs.getInt('practitioner_id');
+    if (practitionerId == null) return;
 
-    final data = results[0] as List<Map<String, dynamic>>;
+    final data = await db.getAllReports(practitionerId);
 
     final now = DateTime.now();
     final weekAgo = now.subtract(const Duration(days: 7));
@@ -86,14 +80,27 @@ class _DashboardPageState extends State<DashboardPage>
       }
     }).length;
 
+    // Today’s insights (basic counts)
+    todayCount = data.where((r) {
+      final raw = r['analysis_date'] ?? r['record_date'];
+      if (raw is String) {
+        final dt = DateTime.tryParse(raw);
+        return dt != null &&
+            dt.year == now.year &&
+            dt.month == now.month &&
+            dt.day == now.day;
+      }
+      return false;
+    }).length;
+
+    todayMRCount = data.where((r) => r['diagnosis'] == 'MR').length;
+    todayMSCount = data.where((r) => r['diagnosis'] == 'MS').length;
+    todayMVPCount = data.where((r) => r['diagnosis'] == 'MVP').length;
+
     setState(() {
       allReports = data;
       totalPatients = tot;
       totalThisWeek = thisWeek;
-      todayCount = results[1] as int;
-      todayMRCount = results[2] as int;
-      todayMSCount = results[3] as int;
-      todayMVPCount = results[4] as int;
     });
   }
 
@@ -151,7 +158,7 @@ class _DashboardPageState extends State<DashboardPage>
                 else
                   ...recentPatients.map((p) => _buildPatientTile(p)),
                 const SizedBox(height: 24),
-                Text('Today\'s Insights',
+                Text("Today's Insights",
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium
@@ -203,7 +210,7 @@ class _DashboardPageState extends State<DashboardPage>
                       text: '$greeting, ',
                       style: const TextStyle(color: Colors.black87)),
                   TextSpan(
-                      text: userName,
+                      text: practitionerName,
                       style: const TextStyle(
                           color: Color(0xFFC31C42),
                           fontWeight: FontWeight.bold)),
@@ -269,7 +276,8 @@ class _DashboardPageState extends State<DashboardPage>
                 ?.copyWith(fontWeight: FontWeight.w700)),
         if (allReports.length > 3)
           GestureDetector(
-            onTap: () => Navigator.pushNamed(context, '/reports'),
+            onTap: () => Navigator.pushNamed(context, '/reports')
+                .then((_) => _loadData()),
             child: const Text('View All',
                 style: TextStyle(
                     color: Color(0xFFC31C42), fontWeight: FontWeight.bold)),
@@ -288,7 +296,7 @@ class _DashboardPageState extends State<DashboardPage>
       }
     } catch (_) {}
 
-    final id = p['user_id'];
+    final id = p['patient_id'];
     final formattedId =
         id != null ? DatabaseHelper.instance.formatPatientId(id as int) : 'N/A';
 

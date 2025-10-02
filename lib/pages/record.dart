@@ -1,5 +1,6 @@
 // lib/pages/record.dart
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -12,23 +13,27 @@ import 'package:flutter_sound/flutter_sound.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart' as file_recorder;
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../database_helper.dart';
 import 'report_generated.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
+
   @override
   State<RecordPage> createState() => _RecordPageState();
 }
 
 class _RecordPageState extends State<RecordPage> {
-  // --- Recording Duration Constant ---
   static const int _recordingDurationInSeconds = 5;
-  // -----------------------------------
 
   final FlutterSoundRecorder _dataStreamer = FlutterSoundRecorder();
-  final file_recorder.AudioRecorder _fileRecorder = file_recorder.AudioRecorder();
+  final file_recorder.AudioRecorder _fileRecorder =
+      file_recorder.AudioRecorder();
   final TfliteService _tfliteService = TfliteService();
+
+  final db = DatabaseHelper.instance;
 
   StreamController<Uint8List>? _recordingDataController;
   StreamSubscription? _dataSubscription;
@@ -91,7 +96,8 @@ class _RecordPageState extends State<RecordPage> {
 
   Future<void> _startRecording() async {
     _recordingDataController = StreamController<Uint8List>();
-    _dataSubscription = _recordingDataController!.stream.listen(_updateWaveform);
+    _dataSubscription =
+        _recordingDataController!.stream.listen(_updateWaveform);
 
     await _dataStreamer.startRecorder(
         toStream: _recordingDataController!.sink, codec: Codec.pcm16);
@@ -120,7 +126,6 @@ class _RecordPageState extends State<RecordPage> {
 
   void _startAutoStopTimer() {
     _recordingTimer?.cancel();
-    // Use the constant for the duration
     const recordingDuration = Duration(seconds: _recordingDurationInSeconds);
 
     _recordingTimer = Timer(recordingDuration, () {
@@ -197,7 +202,6 @@ class _RecordPageState extends State<RecordPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Use the constant for the instruction text
     final String instructionText = _isRecording
         ? "Recording... (stops in $_recordingDurationInSeconds""s)"
         : "Tap to Start";
@@ -215,8 +219,9 @@ class _RecordPageState extends State<RecordPage> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Expanded(
-              child:
-                  _isRecording ? _buildRecordingView() : _buildGuidelinesView(),
+              child: _isRecording
+                  ? _buildRecordingView()
+                  : _buildGuidelinesView(),
             ),
             Hero(
               tag: 'record_button_hero',
@@ -281,11 +286,14 @@ class _RecordPageState extends State<RecordPage> {
             child: Image.asset('assets/images/mitral_area_guide.png'),
           ),
           const SizedBox(height: 24),
-          _buildGuidelineItem(Icons.mic_off_rounded, 'Ensure a quiet environment.'),
-          _buildGuidelineItem(Icons.place_rounded, 'Place stethoscope at the mitral area (as shown).'),
-          // Use the constant for the guideline text
-          _buildGuidelineItem(Icons.timer_rounded, 'The recording will last $_recordingDurationInSeconds seconds for a complete analysis.'),
-          _buildGuidelineItem(Icons.person_rounded, 'Ensure the patient remains still during recording.'),
+          _buildGuidelineItem(
+              Icons.mic_off_rounded, 'Ensure a quiet environment.'),
+          _buildGuidelineItem(Icons.place_rounded,
+              'Place stethoscope at the mitral area (as shown).'),
+          _buildGuidelineItem(Icons.timer_rounded,
+              'The recording will last $_recordingDurationInSeconds seconds for a complete analysis.'),
+          _buildGuidelineItem(Icons.person_rounded,
+              'Ensure the patient remains still during recording.'),
         ],
       ),
     );
@@ -360,7 +368,9 @@ class _RecordPageState extends State<RecordPage> {
         children: [
           Icon(icon, color: const Color(0xFFC31C42), size: 24),
           const SizedBox(width: 16),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 15, height: 1.4))),
+          Expanded(
+              child: Text(text,
+                  style: const TextStyle(fontSize: 15, height: 1.4))),
         ],
       ),
     );
@@ -381,8 +391,13 @@ class _RecordPageState extends State<RecordPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameController, decoration: const InputDecoration(labelText: "Patient Name")),
-            TextField(controller: ageController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: "Age")),
+            TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: "Patient Name")),
+            TextField(
+                controller: ageController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: "Age")),
             DropdownButtonFormField<String>(
               initialValue: gender,
               items: const [
@@ -395,7 +410,9 @@ class _RecordPageState extends State<RecordPage> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(c).pop(null), child: const Text("Cancel")),
+          TextButton(
+              onPressed: () => Navigator.of(c).pop(null),
+              child: const Text("Cancel")),
           ElevatedButton(
             onPressed: () {
               if (nameController.text.trim().isNotEmpty) {
@@ -415,7 +432,14 @@ class _RecordPageState extends State<RecordPage> {
     if (result == null) return;
 
     try {
-      final selectedDirectory = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Select folder to save:');
+      final prefs = await SharedPreferences.getInstance();
+      final practitionerId = prefs.getInt('practitioner_id');
+      if (practitionerId == null) throw Exception("Not logged in.");
+
+      final patientId = await db.findOrCreatePatient(practitionerId, result);
+
+      final selectedDirectory =
+          await FilePicker.platform.getDirectoryPath(dialogTitle: 'Select folder to save:');
       if (selectedDirectory == null) return;
 
       final storagePath = '$selectedDirectory/CardioScope/heart_sounds';
@@ -429,22 +453,48 @@ class _RecordPageState extends State<RecordPage> {
       await tempFile.copy(newPath);
       await tempFile.delete();
 
+      final recordId = await db.insertRecord({
+        "patient_id": patientId,
+        "file_path": newPath,
+        "record_date": DateTime.now().toIso8601String(),
+      });
+
+      if (aiResult != null) {
+        await db.insertAnalysis({
+          "record_id": recordId,
+          "diagnosis": aiResult['label'] ?? "Error",
+          "probabilities": aiResult['probabilities'] != null
+          ? jsonEncode(aiResult['probabilities']) 
+          : "{}",
+          "analysis_date": DateTime.now().toIso8601String(),
+        });
+      }
+
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (_) => ReportGeneratedPage(
-          patientName: result['name'],
-          patientAge: result['age'],
-          patientGender: result['gender'],
-          filePath: newPath,
-          recordedDate: DateTime.now(),
-          classification: aiResult?['label'] ?? 'Error',
-          confidence: aiResult?['confidence'] ?? 0.0,
-          probabilities: aiResult?['probabilities'] as Map<String, double>? ?? {},
+      final updated = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ReportGeneratedPage(
+            patientName: result['name'],
+            patientAge: result['age'],
+            patientGender: result['gender'],
+            filePath: newPath,
+            recordedDate: DateTime.now(),
+            classification: aiResult?['label'] ?? 'Error',
+            probabilities: aiResult?['probabilities'] as Map<String, double>? ??
+                {},
+          ),
         ),
-      ));
+      );
+
+      if (updated == true && mounted) {
+        // Refresh ReportsPage after closing
+        Navigator.pop(context, true);
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error saving: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error saving: $e')));
       }
     }
   }

@@ -1,6 +1,5 @@
 // lib/pages/report_generated.dart
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -19,8 +18,7 @@ class ReportGeneratedPage extends StatefulWidget {
   final String filePath;
   final DateTime recordedDate;
   final String classification;
-  final double confidence;
-  final Map<String, double> probabilities;
+  final Map<String, dynamic> probabilities; // dynamic so we can handle JSON decode safely
 
   const ReportGeneratedPage({
     super.key,
@@ -30,7 +28,6 @@ class ReportGeneratedPage extends StatefulWidget {
     required this.filePath,
     required this.recordedDate,
     required this.classification,
-    required this.confidence,
     required this.probabilities,
   });
 
@@ -47,7 +44,6 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
   void initState() {
     super.initState();
     _waveformFuture = _loadWaveformData();
-    _saveReportToDatabase();
     _initAudioPlayer();
   }
 
@@ -57,7 +53,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
         await _player.setFilePath(widget.filePath);
       }
     } catch (e) {
-      debugPrint("Error loading audio file for playback: $e");
+      debugPrint("Error loading audio file: $e");
     }
   }
 
@@ -65,48 +61,6 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
   void dispose() {
     _player.dispose();
     super.dispose();
-  }
-
-  Future<void> _saveReportToDatabase() async {
-    final nameToSave =
-        widget.patientName.trim().isEmpty ? 'Unnamed' : widget.patientName;
-
-    final db = await DatabaseHelper.instance.database;
-    await db.transaction((txn) async {
-      var existingPatient = await txn.query('users',
-          where: 'name = ? AND age = ? AND gender = ?',
-          whereArgs: [nameToSave, widget.patientAge, widget.patientGender],
-          limit: 1);
-
-      int userId;
-      if (existingPatient.isNotEmpty) {
-        userId = existingPatient.first['id'] as int;
-      } else {
-        userId = await txn.insert('users', {
-          'name': nameToSave,
-          'age': widget.patientAge,
-          'gender': widget.patientGender,
-        });
-      }
-
-      if (mounted) {
-        setState(() => _patientId = userId);
-      }
-
-      final recordId = await txn.insert('heart_sound_records', {
-        'user_id': userId,
-        'file_path': widget.filePath,
-        'record_date': widget.recordedDate.toIso8601String(),
-      });
-
-      await txn.insert('mitral_valve_analysis', {
-        'record_id': recordId,
-        'diagnosis': widget.classification,
-        'confidence': widget.confidence,
-        'probabilities': jsonEncode(widget.probabilities),
-        'analysis_date': DateTime.now().toIso8601String(),
-      });
-    });
   }
 
   Future<List<FlSpot>> _loadWaveformData() async {
@@ -118,9 +72,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     final byteData = ByteData.view(pcmBytes.buffer);
     final spots = <FlSpot>[];
     const int downsamplingFactor = 50;
-    for (int i = 0;
-        i < pcmBytes.lengthInBytes;
-        i += (2 * downsamplingFactor)) {
+    for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsamplingFactor)) {
       if (i + 2 <= pcmBytes.lengthInBytes) {
         final sample = byteData.getInt16(i, Endian.little) / 32768.0;
         spots.add(FlSpot((i / 2).toDouble(), sample));
@@ -137,7 +89,25 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
 
   @override
   Widget build(BuildContext context) {
-    final confidencePercent = (widget.confidence * 100).toStringAsFixed(2);
+    // ✅ Safely handle probabilities
+    Map<String, double> probs = {};
+    try {
+      if (widget.probabilities.isNotEmpty) {
+        // If it's already Map<String,double>
+        if (widget.probabilities is Map<String, double>) {
+          probs = widget.probabilities as Map<String, double>;
+        }
+        // If it's Map<String, dynamic> from DB (string values)
+        else {
+          probs = widget.probabilities.map((k, v) {
+            return MapEntry(k.toString(), (v is num) ? v.toDouble() : 0.0);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error decoding probabilities: $e");
+    }
+
     final patientIdFormatted = _patientId != null
         ? DatabaseHelper.instance.formatPatientId(_patientId!)
         : 'Generating...';
@@ -149,23 +119,23 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
         backgroundColor: const Color(0xFFC31C42),
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () =>
-              Navigator.of(context).popUntil((route) => route.isFirst),
+          onPressed: () => Navigator.of(context).pop(), // ✅ just exit page
         ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Center(
-              child: Text('Analysis Complete!',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold, color: Colors.green[800]))),
+            child: Text('Analysis Complete!',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold, color: Colors.green[800])),
+          ),
           const SizedBox(height: 16),
           Card(
             color: Colors.white,
             elevation: 2,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -183,8 +153,10 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                     _buildDetailRow("Gender:", widget.patientGender),
                     _buildDetailRow("File Location:", widget.filePath,
                         isSelectable: true),
-                    _buildDetailRow("Recorded:",
-                        DateFormat('MMMM d, yyyy HH:mm').format(widget.recordedDate)),
+                    _buildDetailRow(
+                        "Recorded:",
+                        DateFormat('MMMM d, yyyy HH:mm')
+                            .format(widget.recordedDate)),
                   ]),
             ),
           ),
@@ -192,8 +164,8 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           Card(
             color: Colors.white,
             elevation: 2,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -247,8 +219,8 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           Card(
             color: Colors.white,
             elevation: 2,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -261,13 +233,19 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                           ?.copyWith(fontWeight: FontWeight.bold)),
                   const Divider(height: 20),
                   _buildDetailRow("Classification:", widget.classification),
-                  _buildDetailRow("Confidence Score:", "$confidencePercent%"),
                   const SizedBox(height: 10),
-                  const Text("Detailed Breakdown:", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
+                  const Text("Detailed Breakdown:",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, color: Colors.black54)),
                   const SizedBox(height: 8),
-                  ...widget.probabilities.entries.map((entry) {
-                    return _buildProbabilityRow(entry.key, entry.value);
-                  }),
+                  // ✅ Show decoded probs here
+                  if (probs.isEmpty)
+                    const Text("No probabilities available",
+                        style: TextStyle(color: Colors.black54))
+                  else
+                    ...probs.entries.map((entry) {
+                      return _buildProbabilityRow(entry.key, entry.value);
+                    }),
                 ],
               ),
             ),
@@ -285,7 +263,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       ),
     );
   }
-  
+
   Widget _buildPlaybackControls() {
     return StreamBuilder<PlayerState>(
       stream: _player.playerStateStream,
@@ -332,9 +310,12 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                     builder: (context, snapshot) {
                       final duration = snapshot.data ?? Duration.zero;
                       return Slider(
-                        value: _player.position.inMilliseconds.toDouble().clamp(0.0, duration.inMilliseconds.toDouble()),
+                        value: _player.position.inMilliseconds
+                            .toDouble()
+                            .clamp(0.0, duration.inMilliseconds.toDouble()),
                         onChanged: (value) {
-                          _player.seek(Duration(milliseconds: value.toInt()));
+                          _player
+                              .seek(Duration(milliseconds: value.toInt()));
                         },
                         min: 0.0,
                         max: duration.inMilliseconds.toDouble(),
@@ -358,7 +339,10 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
         children: [
-          Expanded(flex: 2, child: Text(label, style: TextStyle(color: Colors.grey.shade700))),
+          Expanded(
+              flex: 2,
+              child: Text(label,
+                  style: TextStyle(color: Colors.grey.shade700))),
           Expanded(
             flex: 5,
             child: LinearProgressIndicator(
@@ -369,7 +353,10 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
               borderRadius: BorderRadius.circular(6),
             ),
           ),
-          Expanded(flex: 2, child: Text("${(value * 100).toStringAsFixed(2)}%", textAlign: TextAlign.end)),
+          Expanded(
+              flex: 2,
+              child: Text("${(value * 100).toStringAsFixed(2)}%",
+                  textAlign: TextAlign.end)),
         ],
       ),
     );
