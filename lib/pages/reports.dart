@@ -1,4 +1,5 @@
 // lib/pages/reports.dart
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -42,7 +43,7 @@ class _ReportsPageState extends State<ReportsPage>
     super.build(context);
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFFC31C42),
+        backgroundColor: AppColors.primary,
         title: const Text('Results', style: TextStyle(color: Colors.white)),
         iconTheme: const IconThemeData(color: Colors.white),
       ),

@@ -1,3 +1,4 @@
+// lib/database_helper.dart
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -6,7 +7,7 @@ import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
   static const _databaseName = "cardioscope.db";
-  static const _databaseVersion = 1;
+  static const _databaseVersion = 2; // bumped to 2 for new fields
 
   DatabaseHelper._privateConstructor();
   static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
@@ -24,20 +25,23 @@ class DatabaseHelper {
       path,
       version: _databaseVersion,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // 1. Practitioners Table
+    // Practitioners Table (with security question/answer)
     await db.execute('''
       CREATE TABLE practitioners (
         practitioner_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
-        pin TEXT NOT NULL
+        pin TEXT NOT NULL,
+        security_question TEXT,
+        security_answer TEXT
       );
     ''');
 
-    // 2. Patients Table
+    // Patients Table
     await db.execute('''
       CREATE TABLE patients (
         patient_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +53,7 @@ class DatabaseHelper {
       );
     ''');
 
-    // 3. Heart Sound Records Table
+    // Heart Sound Records Table
     await db.execute('''
       CREATE TABLE heart_sound_records (
         record_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +64,7 @@ class DatabaseHelper {
       );
     ''');
 
-    // 4. Mitral Valve Analysis Table
+    // Mitral Valve Analysis Table
     await db.execute('''
       CREATE TABLE mitral_valve_analysis (
         analysis_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,6 +75,13 @@ class DatabaseHelper {
         FOREIGN KEY (record_id) REFERENCES heart_sound_records (record_id) ON DELETE CASCADE
       );
     ''');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute("ALTER TABLE practitioners ADD COLUMN security_question TEXT;");
+      await db.execute("ALTER TABLE practitioners ADD COLUMN security_answer TEXT;");
+    }
   }
 
   // --- PRACTITIONER METHODS ---
@@ -94,9 +105,28 @@ class DatabaseHelper {
     return res.isNotEmpty ? res.first : null;
   }
 
-  // --- REPORT CREATION AND FETCHING ---
+  Future<Map<String, dynamic>?> getPractitionerByName(String name) async {
+    final db = await database;
+    final res = await db.query(
+      'practitioners',
+      where: 'name = ?',
+      whereArgs: [name],
+      limit: 1,
+    );
+    return res.isNotEmpty ? res.first : null;
+  }
 
-  /// Finds a patient for a practitioner, or creates them if they don't exist.
+  Future<int> updatePractitionerPin(int id, String newPin) async {
+    final db = await database;
+    return await db.update(
+      'practitioners',
+      {'pin': newPin},
+      where: 'practitioner_id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // --- REPORT CREATION AND FETCHING ---
   Future<int> findOrCreatePatient(int practitionerId, Map<String, dynamic> patientData) async {
     final db = await database;
     final existing = await db.query(
@@ -128,7 +158,6 @@ class DatabaseHelper {
     return await db.insert('mitral_valve_analysis', analysis);
   }
 
-  /// Fetches all combined report data for a specific practitioner.
   Future<List<Map<String, dynamic>>> getAllReports(int practitionerId) async {
     final db = await database;
     final result = await db.rawQuery('''
@@ -154,13 +183,10 @@ class DatabaseHelper {
   }
 
   // --- HELPER METHODS ---
-
-  /// Formats patient ID as CS0000001, CS0000002, etc.
   String formatPatientId(int id) {
     return 'CS${id.toString().padLeft(7, '0')}';
   }
 
-  /// Deletes the entire database file (for debugging purposes).
   Future<void> deleteDatabaseFile() async {
     final path = join((await getDatabasesPath()), _databaseName);
     try {
