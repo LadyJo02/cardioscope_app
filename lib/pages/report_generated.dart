@@ -9,20 +9,24 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../database_helper.dart';
+import '../utils/pdf_exporter.dart';
 
 class ReportGeneratedPage extends StatefulWidget {
+  final int patientId;
   final String patientName;
   final int patientAge;
   final String patientGender;
   final String filePath;
   final DateTime recordedDate;
   final String classification;
-  final Map<String, dynamic> probabilities; // dynamic so we can handle JSON decode safely
+  final Map<String, dynamic> probabilities;
 
   const ReportGeneratedPage({
     super.key,
+    required this.patientId,
     required this.patientName,
     required this.patientAge,
     required this.patientGender,
@@ -38,14 +42,24 @@ class ReportGeneratedPage extends StatefulWidget {
 
 class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
   final AudioPlayer _player = AudioPlayer();
-  Future<List<FlSpot>>? _waveformFuture;
-  int? _patientId;
+  late final Future<List<FlSpot>> _waveformFuture;
+  String _practitionerName = "Practitioner";
 
   @override
   void initState() {
     super.initState();
     _waveformFuture = _loadWaveformData();
     _initAudioPlayer();
+    _loadPractitionerName();
+  }
+
+  Future<void> _loadPractitionerName() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _practitionerName = prefs.getString('practitioner_name') ?? 'Practitioner';
+      });
+    }
   }
 
   Future<void> _initAudioPlayer() async {
@@ -73,7 +87,9 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     final byteData = ByteData.view(pcmBytes.buffer);
     final spots = <FlSpot>[];
     const int downsamplingFactor = 50;
-    for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsamplingFactor)) {
+    for (int i = 0;
+        i < pcmBytes.lengthInBytes;
+        i += (2 * downsamplingFactor)) {
       if (i + 2 <= pcmBytes.lengthInBytes) {
         final sample = byteData.getInt16(i, Endian.little) / 32768.0;
         spots.add(FlSpot((i / 2).toDouble(), sample));
@@ -81,7 +97,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     }
     return spots;
   }
-
+  
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -90,28 +106,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
 
   @override
   Widget build(BuildContext context) {
-    // ✅ Safely handle probabilities
-    Map<String, double> probs = {};
-    try {
-      if (widget.probabilities.isNotEmpty) {
-        // If it's already Map<String,double>
-        if (widget.probabilities is Map<String, double>) {
-          probs = widget.probabilities as Map<String, double>;
-        }
-        // If it's Map<String, dynamic> from DB (string values)
-        else {
-          probs = widget.probabilities.map((k, v) {
-            return MapEntry(k.toString(), (v is num) ? v.toDouble() : 0.0);
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint("Error decoding probabilities: $e");
-    }
-
-    final patientIdFormatted = _patientId != null
-        ? DatabaseHelper.instance.formatPatientId(_patientId!)
-        : 'Generating...';
+    final patientIdFormatted = DatabaseHelper.instance.formatPatientId(widget.patientId);
 
     return Scaffold(
       appBar: AppBar(
@@ -120,23 +115,20 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
         backgroundColor: AppColors.primary,
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(), // ✅ just exit page
+          onPressed: () => Navigator.of(context).pop(),
         ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Center(
-            child: Text('Analysis Complete!',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold, color: Colors.green[800])),
-          ),
+              child: Text('Analysis Complete!',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold, color: Colors.green[800]))),
           const SizedBox(height: 16),
           Card(
-            color: Colors.white,
             elevation: 2,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -154,19 +146,15 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                     _buildDetailRow("Gender:", widget.patientGender),
                     _buildDetailRow("File Location:", widget.filePath,
                         isSelectable: true),
-                    _buildDetailRow(
-                        "Recorded:",
-                        DateFormat('MMMM d, yyyy HH:mm')
-                            .format(widget.recordedDate)),
+                    _buildDetailRow("Recorded:",
+                        DateFormat('MMMM d, yyyy HH:mm').format(widget.recordedDate)),
                   ]),
             ),
           ),
           const SizedBox(height: 16),
           Card(
-            color: Colors.white,
             elevation: 2,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -218,10 +206,9 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           ),
           const SizedBox(height: 16),
           Card(
-            color: Colors.white,
             elevation: 2,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -239,13 +226,12 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                       style: TextStyle(
                           fontWeight: FontWeight.bold, color: Colors.black54)),
                   const SizedBox(height: 8),
-                  // ✅ Show decoded probs here
-                  if (probs.isEmpty)
+                  if (widget.probabilities.isEmpty)
                     const Text("No probabilities available",
                         style: TextStyle(color: Colors.black54))
                   else
-                    ...probs.entries.map((entry) {
-                      return _buildProbabilityRow(entry.key, entry.value);
+                    ...widget.probabilities.entries.map((entry) {
+                      return _buildProbabilityRow(entry.key, entry.value as double);
                     }),
                 ],
               ),
@@ -255,8 +241,21 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
         ]),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          // TODO: implement export PDF
+        onPressed: () async {
+          // ✅ FIXED: This call no longer passes 'waveformBytes'
+          await PdfExporter.exportSingleReport(
+            report: {
+              'patient_id': widget.patientId,
+              'name': widget.patientName,
+              'age': widget.patientAge,
+              'gender': widget.patientGender,
+              'file_path': widget.filePath,
+              'record_date': widget.recordedDate.toIso8601String(),
+              'diagnosis': widget.classification,
+              'probabilities': widget.probabilities,
+            },
+            practitionerName: _practitionerName,
+          );
         },
         icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
         label: const Text("Export PDF", style: TextStyle(color: Colors.white)),
@@ -291,6 +290,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                   _player.pause();
                 } else if (processingState == ProcessingState.completed) {
                   _player.seek(Duration.zero);
+                  _player.play();
                 } else {
                   _player.play();
                 }
@@ -315,8 +315,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                             .toDouble()
                             .clamp(0.0, duration.inMilliseconds.toDouble()),
                         onChanged: (value) {
-                          _player
-                              .seek(Duration(milliseconds: value.toInt()));
+                          _player.seek(Duration(milliseconds: value.toInt()));
                         },
                         min: 0.0,
                         max: duration.inMilliseconds.toDouble(),
@@ -363,8 +362,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     );
   }
 
-  Widget _buildDetailRow(String label, String value,
-      {bool isSelectable = false}) {
+  Widget _buildDetailRow(String label, String value, {bool isSelectable = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

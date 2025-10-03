@@ -7,7 +7,6 @@ import 'dart:typed_data';
 import 'package:cardioscope_app/services/tflite_service.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/widgets/custom_button.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
@@ -30,10 +29,8 @@ class _RecordPageState extends State<RecordPage> {
   static const int _recordingDurationInSeconds = 5;
 
   final FlutterSoundRecorder _dataStreamer = FlutterSoundRecorder();
-  final file_recorder.AudioRecorder _fileRecorder =
-      file_recorder.AudioRecorder();
+  final file_recorder.AudioRecorder _fileRecorder = file_recorder.AudioRecorder();
   final TfliteService _tfliteService = TfliteService();
-
   final db = DatabaseHelper.instance;
 
   StreamController<Uint8List>? _recordingDataController;
@@ -162,6 +159,157 @@ class _RecordPageState extends State<RecordPage> {
         }
       } else {
         setState(() => _isProcessing = false);
+      }
+    }
+  }
+  
+  Future<void> _askPatientInfoAndSave(String tempPath, Map<String, dynamic>? aiResult) async {
+    final nameController = TextEditingController();
+    final ageController = TextEditingController();
+    String gender = "Female";
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => AlertDialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        title: const Text("Save Recording"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: "Patient Name")),
+            TextField(
+                controller: ageController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: "Age")),
+            DropdownButtonFormField<String>(
+              initialValue: gender,
+              items: const [
+                DropdownMenuItem(value: "Female", child: Text("Female")),
+                DropdownMenuItem(value: "Male", child: Text("Male")),
+              ],
+              onChanged: (val) => gender = val ?? "Female",
+              decoration: const InputDecoration(labelText: "Gender"),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(c).pop(null),
+              child: const Text("Don't Save")),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(c).pop({
+                "name": nameController.text.trim(),
+                "age": int.tryParse(ageController.text.trim()) ?? 0,
+                "gender": gender
+              });
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) {
+      try {
+        final tempFile = File(tempPath);
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      } catch (e) {
+        debugPrint("Error deleting temp file: $e");
+      }
+      return;
+    }
+    
+    if(mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return const Center(child: CircularProgressIndicator());
+        },
+      );
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final practitionerId = prefs.getInt('practitioner_id');
+      if (practitionerId == null) throw Exception("Not logged in.");
+
+      final patientName = result['name'].isEmpty ? 'Unnamed' : result['name'];
+      final patientData = {
+        'name': patientName,
+        'age': result['age'],
+        'gender': result['gender']
+      };
+
+      final patientId = await db.findOrCreatePatient(practitionerId, patientData);
+
+      final docDir = await getApplicationDocumentsDirectory();
+      final storagePath = '${docDir.path}/CardioScope/heart_sounds';
+      await Directory(storagePath).create(recursive: true);
+
+      final date = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final safeName = patientName.replaceAll(RegExp(r'\s+'), "_");
+      final newPath = "$storagePath/${safeName}_${patientId}_$date.wav";
+
+      final tempFile = File(tempPath);
+      await tempFile.copy(newPath);
+      await tempFile.delete();
+
+      final recordDate = DateTime.now();
+      final recordId = await db.insertRecord({
+        "patient_id": patientId,
+        "file_path": newPath,
+        "record_date": recordDate.toIso8601String(),
+      });
+
+      if (aiResult != null) {
+        await db.insertAnalysis({
+          "record_id": recordId,
+          "diagnosis": aiResult['label'] ?? "Error",
+          "probabilities": aiResult['probabilities'] != null
+              ? jsonEncode(aiResult['probabilities'])
+              : "{}",
+          "analysis_date": DateTime.now().toIso8601String(),
+        });
+      }
+
+      if (!mounted) return;
+      Navigator.pop(context);
+
+      // ✅ FIXED: Navigate to the new report page and wait for it to be closed
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ReportGeneratedPage(
+            patientId: patientId,
+            patientName: patientName,
+            patientAge: result['age'],
+            patientGender: result['gender'],
+            filePath: newPath,
+            recordedDate: recordDate,
+            classification: aiResult?['label'] ?? 'Error',
+            probabilities: aiResult?['probabilities'] as Map<String, dynamic>? ?? {},
+          ),
+        ),
+      );
+
+      // ✅ FIXED: After the user closes the report, pop this page and send "true" back.
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); 
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error saving record: $e')));
       }
     }
   }
@@ -375,128 +523,5 @@ class _RecordPageState extends State<RecordPage> {
         ],
       ),
     );
-  }
-
-  Future<void> _askPatientInfoAndSave(
-      String tempPath, Map<String, dynamic>? aiResult) async {
-    final nameController = TextEditingController();
-    final ageController = TextEditingController();
-    String gender = "Male";
-
-    final result = await showDialog<Map<String, dynamic>>(
-      context: context,
-      barrierDismissible: false,
-      builder: (c) => AlertDialog(
-        backgroundColor: Colors.white,
-        title: const Text("Save Recording"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: "Patient Name")),
-            TextField(
-                controller: ageController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Age")),
-            DropdownButtonFormField<String>(
-              initialValue: gender,
-              items: const [
-                DropdownMenuItem(value: "Male", child: Text("Male")),
-                DropdownMenuItem(value: "Female", child: Text("Female")),
-              ],
-              onChanged: (val) => gender = val ?? "Male",
-              decoration: const InputDecoration(labelText: "Gender"),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(c).pop(null),
-              child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () {
-              if (nameController.text.trim().isNotEmpty) {
-                Navigator.of(c).pop({
-                  "name": nameController.text.trim(),
-                  "age": int.tryParse(ageController.text.trim()) ?? 0,
-                  "gender": gender
-                });
-              }
-            },
-            child: const Text("Save"),
-          ),
-        ],
-      ),
-    );
-
-    if (result == null) return;
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final practitionerId = prefs.getInt('practitioner_id');
-      if (practitionerId == null) throw Exception("Not logged in.");
-
-      final patientId = await db.findOrCreatePatient(practitionerId, result);
-
-      final selectedDirectory =
-          await FilePicker.platform.getDirectoryPath(dialogTitle: 'Select folder to save:');
-      if (selectedDirectory == null) return;
-
-      final storagePath = '$selectedDirectory/CardioScope/heart_sounds';
-      await Directory(storagePath).create(recursive: true);
-
-      final date = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final safeName = result['name'].replaceAll(RegExp(r'\s+'), "_");
-      final newPath = "$storagePath/${safeName}_$date.wav";
-
-      final tempFile = File(tempPath);
-      await tempFile.copy(newPath);
-      await tempFile.delete();
-
-      final recordId = await db.insertRecord({
-        "patient_id": patientId,
-        "file_path": newPath,
-        "record_date": DateTime.now().toIso8601String(),
-      });
-
-      if (aiResult != null) {
-        await db.insertAnalysis({
-          "record_id": recordId,
-          "diagnosis": aiResult['label'] ?? "Error",
-          "probabilities": aiResult['probabilities'] != null
-          ? jsonEncode(aiResult['probabilities']) 
-          : "{}",
-          "analysis_date": DateTime.now().toIso8601String(),
-        });
-      }
-
-      if (!mounted) return;
-      final updated = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ReportGeneratedPage(
-            patientName: result['name'],
-            patientAge: result['age'],
-            patientGender: result['gender'],
-            filePath: newPath,
-            recordedDate: DateTime.now(),
-            classification: aiResult?['label'] ?? 'Error',
-            probabilities: aiResult?['probabilities'] as Map<String, double>? ??
-                {},
-          ),
-        ),
-      );
-
-      if (updated == true && mounted) {
-        // Refresh ReportsPage after closing
-        Navigator.pop(context, true);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error saving: $e')));
-      }
-    }
   }
 }

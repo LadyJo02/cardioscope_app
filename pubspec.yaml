@@ -22,6 +22,8 @@ dependencies:
   # UI & Charts
   cupertino_icons: ^1.0.8            # iOS-style icons
   fl_chart: ^1.1.1                   # Charting library for visualizations (e.g., waveforms)
+  screenshot: ^3.0.0
+  smooth_page_indicator: ^1.1.0 
 
   # Hardware, Permissions & Audio
   flutter_blue_plus: ^1.5.0          # Bluetooth Low Energy (BLE) support
@@ -38,7 +40,9 @@ dependencies:
   audio_session: ^0.1.25             # Manage audio focus and routing
   provider: ^6.1.5+1                 # State management
   fftea: ^1.5.0+1                    # FFT and audio analysis
-
+  printing: ^5.12.0                  # Print and preview PDFs
+  share_plus: ^7.2.1                 # Share files via native share dialogs  
+  excel: ^2.1.0                      # Generate Excel reports    
 
 dev_dependencies:
   flutter_test:

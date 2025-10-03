@@ -1,30 +1,32 @@
-// lib/main.dart
+import 'package:cardioscope_app/pages/onboarding_page.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'pages/dashboard.dart';
-import 'pages/login.dart'; // ✅ new login page
+import 'pages/login.dart';
 import 'pages/record.dart';
 import 'pages/reports.dart';
 import 'pages/settings.dart';
 import 'services/tflite_service.dart';
-import 'utils/app_colors.dart'; // ✅ centralized color palette
+import 'utils/app_colors.dart';
 
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ Load preferences
   final prefs = await SharedPreferences.getInstance();
+
+  // Check for both onboarding and login status
+  final hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
+  final int? practitionerId = prefs.getInt("practitioner_id");
+
+  // Load theme
   final isDarkMode = prefs.getBool('isDarkMode') ?? false;
   themeNotifier.value = isDarkMode ? ThemeMode.dark : ThemeMode.light;
 
-  // ✅ Read practitioner_id instead of userName
-  final int? practitionerId = prefs.getInt("practitioner_id");
-
-  // ✅ Request storage permission
+  // Request storage permission
   final asked = prefs.getBool('storagePermissionAsked') ?? false;
   if (!asked) {
     if (await Permission.storage.request().isGranted) {
@@ -32,16 +34,37 @@ Future<void> main() async {
     }
   }
 
-  // ✅ Pre-load the AI model for faster first-time use
+  // Pre-load the AI model
   final tflite = TfliteService();
   await tflite.loadModel();
 
-  runApp(CardioScopeApp(practitionerId: practitionerId));
+  runApp(CardioScopeApp(
+    hasSeenOnboarding: hasSeenOnboarding,
+    isLoggedIn: practitionerId != null,
+  ));
 }
 
 class CardioScopeApp extends StatelessWidget {
-  final int? practitionerId;
-  const CardioScopeApp({super.key, this.practitionerId});
+  final bool hasSeenOnboarding;
+  final bool isLoggedIn;
+
+  const CardioScopeApp({
+    super.key,
+    required this.hasSeenOnboarding,
+    required this.isLoggedIn,
+  });
+
+  Widget _getInitialPage() {
+    if (!hasSeenOnboarding) {
+      return const OnboardingPage();
+    } else {
+      if (isLoggedIn) {
+        return const MainNavigation();
+      } else {
+        return const LoginPage();
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -52,8 +75,6 @@ class CardioScopeApp extends StatelessWidget {
           title: 'CardioScope',
           debugShowCheckedModeBanner: false,
           themeMode: mode,
-
-          // ✅ Light theme
           theme: ThemeData(
             brightness: Brightness.light,
             scaffoldBackgroundColor: AppColors.scaffoldBackground,
@@ -73,8 +94,6 @@ class CardioScopeApp extends StatelessWidget {
             ),
             useMaterial3: true,
           ),
-
-          // ✅ Dark theme
           darkTheme: ThemeData(
             brightness: Brightness.dark,
             primaryColor: AppColors.primary,
@@ -93,17 +112,11 @@ class CardioScopeApp extends StatelessWidget {
             ),
             useMaterial3: true,
           ),
-
-          // ✅ NEW INITIAL ROUTE LOGIC
-          home: practitionerId == null
-              ? const LoginPage()
-              : const MainNavigation(),
-
+          home: _getInitialPage(),
           routes: {
             '/record': (context) => const RecordPage(),
             '/reports': (context) => const ReportsPage(),
-            '/settings': (context) =>
-                SettingsPage(themeNotifier: themeNotifier),
+            '/settings': (context) => SettingsPage(themeNotifier: themeNotifier),
           },
         );
       },
@@ -111,7 +124,6 @@ class CardioScopeApp extends StatelessWidget {
   }
 }
 
-// ✅ MainNavigation unchanged, only uses Dashboard + Reports
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
 
@@ -171,6 +183,7 @@ class _MainNavigationState extends State<MainNavigation> {
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: BottomAppBar(
         color: Colors.white,
+        surfaceTintColor: Colors.white,
         shape: const CircularNotchedRectangle(),
         notchMargin: 10.0,
         height: 70,
@@ -179,7 +192,7 @@ class _MainNavigationState extends State<MainNavigation> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: <Widget>[
             _buildNavItem(Icons.dashboard_rounded, 'Dashboard', 0),
-            const SizedBox(width: 80),
+            const SizedBox(width: 80), // The space for the FAB
             _buildNavItem(Icons.analytics_rounded, 'Results', 1),
           ],
         ),
@@ -208,3 +221,4 @@ class _MainNavigationState extends State<MainNavigation> {
     );
   }
 }
+
