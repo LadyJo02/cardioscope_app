@@ -116,7 +116,7 @@ class _ForgotPinPageState extends State<ForgotPinPage> {
             ),
             const SizedBox(height: 24),
             DropdownButtonFormField<String>(
-              value: _selectedPractitioner,
+              initialValue: _selectedPractitioner,
               items: practitioners
                   .map((p) => DropdownMenuItem(
                         value: p['name'] as String,
