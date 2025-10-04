@@ -33,6 +33,7 @@ class PdfExporter {
         header: (context) => _buildHeader(practitionerName, now, logo),
         footer: (context) => _buildFooter(context),
         build: (context) => [
+          // ✅ FIXED: Argument order is now correct
           _buildReportContent(report, waveformImage),
         ],
       ),
@@ -55,7 +56,6 @@ class PdfExporter {
     final now = DateFormat('MMMM dd, yyyy – hh:mm a').format(DateTime.now());
 
     for (final report in reports) {
-      // ✅ THIS NOW GENERATES A WAVEFORM FOR EVERY REPORT IN THE BATCH
       final waveformImage = await _generateWaveformImage(report['file_path']);
       pdf.addPage(
         pw.MultiPage(
@@ -63,6 +63,7 @@ class PdfExporter {
           header: (context) => _buildHeader(practitionerName, now, logo),
           footer: (context) => _buildFooter(context),
           build: (context) => [
+            // ✅ FIXED: Argument order is now correct
             _buildReportContent(report, waveformImage),
           ],
         ),
@@ -98,6 +99,7 @@ class PdfExporter {
     );
   }
 
+  // ✅ FIXED: The function signature parameter order is now correct
   static pw.Widget _buildReportContent(Map<String, dynamic> report, pw.ImageProvider? waveformImage) {
     Map<String, dynamic> probs = {};
     if (report['probabilities'] is String && (report['probabilities'] as String).isNotEmpty) {
@@ -164,7 +166,6 @@ class PdfExporter {
     );
   }
 
-  // ✅ FIXED: Changed the section header style to use a full-width Divider.
   static pw.Widget _buildSectionHeader(String title) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,

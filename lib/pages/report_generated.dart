@@ -50,7 +50,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     super.initState();
     _waveformFuture = _loadWaveformData();
     _initAudioPlayer();
-    _loadPractitionerName();
+    _loadPractitionerName(); 
   }
 
   Future<void> _loadPractitionerName() async {
@@ -242,7 +242,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
-          // ✅ FIXED: This call no longer passes 'waveformBytes'
+          // ✅ FIXED: The call is now simpler and correct.
           await PdfExporter.exportSingleReport(
             report: {
               'patient_id': widget.patientId,
