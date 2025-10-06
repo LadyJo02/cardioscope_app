@@ -7,6 +7,7 @@ import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/services/tflite_service.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/widgets/custom_button.dart';
+import 'package:cardioscope_app/widgets/patient_form_dialog.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
@@ -162,84 +163,34 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
+  // ✅ Smart Patient Info Dialog Integration
   Future<void> _askPatientInfoAndSave(
       String tempPath, Map<String, dynamic>? aiResult) async {
-    final nameController = TextEditingController();
-    final ageController = TextEditingController();
-    String gender = "Female";
-
     final navigator = Navigator.of(context);
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
+    // Step 1: Ask for patient info
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
-      builder: (c) => AlertDialog(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        title: const Text("Save Recording"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: "Patient Name")),
-            TextField(
-                controller: ageController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Age")),
-            DropdownButtonFormField<String>(
-              initialValue: gender,
-              items: const [
-                DropdownMenuItem(value: "Female", child: Text("Female")),
-                DropdownMenuItem(value: "Male", child: Text("Male")),
-              ],
-              onChanged: (val) => gender = val ?? "Female",
-              decoration: const InputDecoration(labelText: "Gender"),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(c).pop(null),
-              child: const Text("Don't Save")),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(c).pop({
-                "name": nameController.text.trim(),
-                "age": int.tryParse(ageController.text.trim()) ?? 0,
-                "gender": gender
-              });
-            },
-            child: const Text("Save"),
-          ),
-        ],
-      ),
+      builder: (_) => const PatientFormDialog(),
     );
 
     if (result == null) {
       try {
         final tempFile = File(tempPath);
-        if (await tempFile.exists()) {
-          await tempFile.delete();
-        }
-      } catch (e) {
-        debugPrint("Error deleting temp file: $e");
-      }
+        if (await tempFile.exists()) await tempFile.delete();
+      } catch (_) {}
       return;
     }
 
-    // ✅ FIXED: Added a `mounted` check before showing the dialog.
+    // Show loading spinner
     if (mounted) {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (BuildContext context) {
-          return const Center(child: CircularProgressIndicator());
-        },
+        builder: (_) => const Center(child: CircularProgressIndicator()),
       );
-    } else {
-      return; // Exit if the widget is no longer on screen
     }
 
     try {
@@ -250,30 +201,35 @@ class _RecordPageState extends State<RecordPage> {
       final patientName = result['name'].isEmpty ? 'Unnamed' : result['name'];
       final patientData = {
         'name': patientName,
-        'age': result['age'],
-        'gender': result['gender']
+        'birthday': result['birthday'],
+        'age': DateTime.now().year -
+            DateTime.parse(result['birthday']).year,
+        'gender': result['gender'],
       };
 
-      final patientId =
-          await db.findOrCreatePatient(practitionerId, patientData);
+      final patientId = await db.findOrCreatePatient(practitionerId, patientData);
 
       final storageService = StorageService();
       final publicSavePath = await storageService.getSavedPath();
-
       if (publicSavePath == null) {
-        throw Exception(
-            "Public save folder not selected. Please go back and tap the mic button again.");
+        throw Exception("Public save folder not selected. Please go back and tap the mic button again.");
       }
 
+      // Step 2: Create Patient Folder
+      final safeName = patientName.replaceAll(RegExp(r'[^a-zA-Z0-9_ ]'), "_");
+      final patientFolder = "$publicSavePath/$safeName";
+      await Directory(patientFolder).create(recursive: true);
+
+      // Step 3: Save recording
       final date = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final safeName = patientName.replaceAll(RegExp(r'\s+'), "_");
       final newFileName = "${safeName}_${patientId}_$date.wav";
-      final newPublicPath = "$publicSavePath/$newFileName";
+      final newPublicPath = "$patientFolder/$newFileName";
 
       final tempFile = File(tempPath);
       await tempFile.copy(newPublicPath);
       await tempFile.delete();
 
+      // Step 4: Save record in DB
       final recordDate = DateTime.now();
       final recordId = await db.insertRecord({
         "patient_id": patientId,
@@ -293,15 +249,15 @@ class _RecordPageState extends State<RecordPage> {
       }
 
       if (!mounted) return;
-      navigator.pop(); // Pop loading spinner
+      navigator.pop(); // close spinner
 
       await navigator.push(
         MaterialPageRoute(
           builder: (_) => ReportGeneratedPage(
             patientId: patientId,
             patientName: patientName,
-            patientAge: result['age'],
-            patientGender: result['gender'],
+            patientAge: patientData['age'],
+            patientGender: patientData['gender'],
             filePath: newPublicPath,
             recordedDate: recordDate,
             classification: aiResult?['label'] ?? 'Error',
@@ -311,18 +267,18 @@ class _RecordPageState extends State<RecordPage> {
         ),
       );
 
-      if (mounted) {
-        navigator.pop(true);
-      }
+      if (mounted) navigator.pop(true);
     } catch (e) {
       if (mounted) {
         navigator.pop();
-        scaffoldMessenger
-            .showSnackBar(SnackBar(content: Text('Error saving record: $e')));
+        scaffoldMessenger.showSnackBar(
+          SnackBar(content: Text('Error saving record: $e')),
+        );
       }
     }
   }
 
+  // ===== Waveform Visualization Logic =====
   void _updateWaveform(Uint8List rawData) {
     final byteData = rawData.buffer.asByteData();
     final samples = <double>[];
@@ -361,7 +317,7 @@ class _RecordPageState extends State<RecordPage> {
   @override
   Widget build(BuildContext context) {
     final String instructionText = _isRecording
-        ? "Recording... (stops in $_recordingDurationInSeconds""s)"
+        ? "Recording... (stops in $_recordingDurationInSeconds s)"
         : "Tap to Start";
 
     return Scaffold(
