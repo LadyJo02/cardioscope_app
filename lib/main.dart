@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'database_helper.dart'; // ✅ added import
 import 'pages/dashboard.dart';
 import 'pages/login.dart';
 import 'pages/record.dart';
@@ -32,6 +33,9 @@ Future<void> main() async {
 
   final tflite = TfliteService();
   await tflite.loadModel();
+
+  // ✅ Verify DB structure once after model load
+  await DatabaseHelper.instance.verifyDatabaseStructure();
 
   runApp(CardioScopeApp(
     hasSeenOnboarding: hasSeenOnboarding,
@@ -157,7 +161,6 @@ class _MainNavigationState extends State<MainNavigation> {
 
   Future<void> _handleMicPressed() async {
     final storageService = StorageService();
-    // ✅ FIXED: Removed the unused `navigator` variable.
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     final savedPath = await storageService.getSavedPath();
@@ -236,6 +239,7 @@ class _MainNavigationState extends State<MainNavigation> {
         );
         return;
       }
+
       debugPrint('✅ Folder path saved: $pickedPath');
       scaffoldMessenger.showSnackBar(
         SnackBar(
@@ -329,7 +333,7 @@ class _MainNavigationState extends State<MainNavigation> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: <Widget>[
             _buildNavItem(Icons.dashboard_rounded, 'Dashboard', 0),
-            const SizedBox(width: 80), // Space for FAB
+            const SizedBox(width: 80),
             _buildNavItem(Icons.analytics_rounded, 'Results', 1),
           ],
         ),
