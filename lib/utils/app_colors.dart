@@ -14,4 +14,5 @@ class AppColors {
 
   // Utility/semantic
   static const Color scaffoldBackground = Color(0xFFF5F5F5); // keep the subtle gray if desired
+  static const Color warning = Colors.redAccent;
 }

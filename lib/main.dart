@@ -1,4 +1,5 @@
 import 'package:cardioscope_app/pages/onboarding_page.dart';
+import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,12 +11,16 @@ import 'pages/reports.dart';
 import 'pages/settings.dart';
 import 'services/storage_service.dart';
 import 'services/tflite_service.dart';
-import 'utils/app_colors.dart';
 
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await [
+    Permission.microphone,
+    Permission.storage,
+  ].request();
 
   final prefs = await SharedPreferences.getInstance();
 
@@ -24,13 +29,6 @@ Future<void> main() async {
 
   final isDarkMode = prefs.getBool('isDarkMode') ?? false;
   themeNotifier.value = isDarkMode ? ThemeMode.dark : ThemeMode.light;
-
-  final asked = prefs.getBool('storagePermissionAsked') ?? false;
-  if (!asked) {
-    if (await Permission.storage.request().isGranted) {
-      await prefs.setBool('storagePermissionAsked', true);
-    }
-  }
 
   final tflite = TfliteService();
   await tflite.loadModel();
@@ -109,7 +107,8 @@ class CardioScopeApp extends StatelessWidget {
           routes: {
             '/record': (context) => const RecordPage(),
             '/reports': (context) => const ReportsPage(),
-            '/settings': (context) => SettingsPage(themeNotifier: themeNotifier),
+            '/settings': (context) =>
+                SettingsPage(themeNotifier: themeNotifier),
           },
         );
       },
@@ -156,27 +155,26 @@ class _MainNavigationState extends State<MainNavigation> {
     super.dispose();
   }
 
-  /// 🧩 MIC BUTTON LOGIC — Includes cancel reminder dialog
   Future<void> _handleMicPressed() async {
     final storageService = StorageService();
+    // ✅ FIXED: Removed the unused `navigator` variable.
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     final savedPath = await storageService.getSavedPath();
+    debugPrint('🔍 Checking saved folder path: $savedPath');
 
-    debugPrint('🔍 Checking saved folder path...');
-    debugPrint('Saved path: $savedPath');
-
-    // 🆕 Case 1 — First time user (no folder saved)
     if (savedPath == null || savedPath.isEmpty) {
       debugPrint('🆕 No folder path found. Showing folder selection dialog.');
-
       if (!mounted) return;
 
       final proceed = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Select Save Folder'),
-          content: const Text(
-            'For better access, please select or create a folder inside Downloads (e.g., CardioScope).',
-          ),
+        builder: (ctx) => _buildDialog(
+          icon: Icons.folder_open_rounded,
+          iconColor: AppColors.deep,
+          title: 'Select Save Folder',
+          message:
+              'To save recordings properly, please select a folder for your recordings (e.g., in your Downloads folder).',
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
@@ -184,24 +182,26 @@ class _MainNavigationState extends State<MainNavigation> {
             ),
             ElevatedButton(
               onPressed: () => Navigator.of(ctx).pop(true),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white),
               child: const Text('Select Folder'),
             ),
           ],
         ),
       );
 
-      // ❌ If user pressed "Cancel" — show reminder dialog
       if (proceed != true) {
         debugPrint('❌ User canceled folder selection dialog.');
-
         if (!mounted) return;
         await showDialog(
           context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Folder Required'),
-            content: const Text(
-              'You need to select a folder to save recordings.\nPlease tap the mic button again to continue.',
-            ),
+          builder: (ctx) => _buildDialog(
+            icon: Icons.warning_amber_rounded,
+            iconColor: AppColors.warning,
+            title: 'Folder Required',
+            message:
+                'You must select a save location before you can record.\n\nTap the mic button again to choose a folder.',
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -217,16 +217,15 @@ class _MainNavigationState extends State<MainNavigation> {
       debugPrint('📁 Folder picked: $pickedPath');
 
       if (!mounted) return;
-
-      // ❌ If user cancels the system folder picker
       if (pickedPath == null || pickedPath.isEmpty) {
         await showDialog(
           context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Folder Required'),
-            content: const Text(
-              'You must select a folder to save recordings.\nPlease tap the mic button again to continue.',
-            ),
+          builder: (ctx) => _buildDialog(
+            icon: Icons.warning_amber_rounded,
+            iconColor: AppColors.warning,
+            title: 'Folder Required',
+            message:
+                'Folder selection was cancelled. You must select a folder to save your recordings.',
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -237,25 +236,55 @@ class _MainNavigationState extends State<MainNavigation> {
         );
         return;
       }
-
-      // ✅ Folder successfully selected and saved
       debugPrint('✅ Folder path saved: $pickedPath');
-      ScaffoldMessenger.of(context).showSnackBar(
+      scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text('Folder selected: $pickedPath'),
-          duration: const Duration(seconds: 2),
+          content: Text('Save location set: $pickedPath'),
+          duration: const Duration(seconds: 3),
         ),
       );
-
-      if (!mounted) return;
       _navigateToRecordPage();
-    } 
-    // 🔁 Case 2 — Returning user
-    else {
+    } else {
       debugPrint('✅ Existing folder path detected: $savedPath');
-      if (!mounted) return;
       _navigateToRecordPage();
     }
+  }
+
+  Widget _buildDialog({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String message,
+    required List<Widget> actions,
+  }) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      title: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: iconColor, size: 28),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+            ),
+          ),
+        ],
+      ),
+      content: Padding(
+        padding: const EdgeInsets.only(top: 4.0),
+        child: Text(
+          message,
+          style: const TextStyle(fontSize: 15, height: 1.5),
+          textAlign: TextAlign.start,
+        ),
+      ),
+      actionsAlignment: MainAxisAlignment.end,
+      actionsPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      actions: actions,
+    );
   }
 
   Future<void> _navigateToRecordPage() async {

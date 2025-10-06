@@ -1,8 +1,10 @@
-// lib/pages/reports.dart
+import 'dart:io';
+
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../database_helper.dart';
@@ -11,15 +13,12 @@ import '../utils/pdf_exporter.dart';
 import 'reports_detail.dart';
 
 class ReportsPage extends StatefulWidget {
-  // The key is now correctly handled by the super constructor
   const ReportsPage({super.key});
 
   @override
-  // ✅ FIXED: Renamed to use the public state class
   State<ReportsPage> createState() => ReportsPageState();
 }
 
-// ✅ FIXED: Renamed _ReportsPageState to ReportsPageState (made it public)
 class ReportsPageState extends State<ReportsPage>
     with AutomaticKeepAliveClientMixin {
   @override
@@ -37,7 +36,6 @@ class ReportsPageState extends State<ReportsPage>
     load();
   }
 
-  // ✅ FIXED: Renamed _load to load (made it public)
   Future<void> load() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
@@ -60,10 +58,57 @@ class ReportsPageState extends State<ReportsPage>
     }
   }
 
-  Future<void> _handleExport(Future<void> Function(List<Map<String, dynamic>>, DateTimeRange) exportFunction) async {
-    if (!mounted) return;
-    final picked = await showDateRangePicker(
+  // ✅ ADDED: New function to handle the actual sharing of filtered files.
+  Future<void> _exportWavFiles(
+      List<Map<String, dynamic>> filteredReports, DateTimeRange dateRange) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+    showDialog(
       context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final List<XFile> filesToShare = [];
+      for (final report in filteredReports) {
+        final filePath = report['file_path'] as String?;
+        if (filePath != null) {
+          final file = File(filePath);
+          if (await file.exists()) {
+            filesToShare.add(XFile(filePath));
+          } else {
+            debugPrint("File not found for sharing: $filePath");
+          }
+        }
+      }
+
+      if (mounted) Navigator.of(context).pop();
+
+      if (filesToShare.isNotEmpty) {
+        await Share.shareXFiles(filesToShare,
+            text:
+                'CardioScope WAV files from ${DateFormat('yyyy-MM-dd').format(dateRange.start)} to ${DateFormat('yyyy-MM-dd').format(dateRange.end)}');
+      } else {
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(
+              content: Text("No WAV files found in this date range.")),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error exporting WAV files: $e");
+      if (mounted) Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _handleExport(
+      Future<void> Function(List<Map<String, dynamic>>, DateTimeRange)
+          exportFunction) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final currentContext = context;
+
+    final picked = await showDateRangePicker(
+      context: currentContext,
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 1)),
       initialDateRange: DateTimeRange(
@@ -72,7 +117,7 @@ class ReportsPageState extends State<ReportsPage>
       ),
     );
 
-    if (picked == null || _practitionerId == null) return;
+    if (!mounted || picked == null || _practitionerId == null) return;
 
     final filteredReports = await db.getAllReports(
       _practitionerId!,
@@ -80,15 +125,15 @@ class ReportsPageState extends State<ReportsPage>
       endDate: picked.end,
     );
 
+    if (!mounted) return;
+
     if (filteredReports.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("No reports found in this date range.")),
-        );
-      }
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text("No reports found in this date range.")),
+      );
       return;
     }
-    
+
     await exportFunction(filteredReports, picked);
   }
 
@@ -101,27 +146,34 @@ class ReportsPageState extends State<ReportsPage>
         title: const Text('Results', style: TextStyle(color: Colors.white)),
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
+          // ✅ CHANGED: The share button is now a permanent export feature
+          IconButton(
+            icon: const Icon(Icons.ios_share),
+            tooltip: "Export WAV Files",
+            onPressed: () => _handleExport(
+              (filteredList, dateRange) =>
+                  _exportWavFiles(filteredList, dateRange),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.picture_as_pdf_outlined),
             tooltip: "Export to PDF",
             onPressed: () => _handleExport((filteredList, dateRange) =>
-              PdfExporter.exportBatchReports(
-                reports: filteredList,
-                practitionerName: _practitionerName,
-                dateRange: dateRange,
-              )
-            ),
+                PdfExporter.exportBatchReports(
+                  reports: filteredList,
+                  practitionerName: _practitionerName,
+                  dateRange: dateRange,
+                )),
           ),
           IconButton(
             icon: const Icon(Icons.table_view_outlined),
             tooltip: "Export to Excel",
             onPressed: () => _handleExport((filteredList, dateRange) =>
-              ExcelExporter.exportReportsToExcel(
-                reports: filteredList,
-                practitionerName: _practitionerName,
-                dateRange: dateRange,
-              )
-            ),
+                ExcelExporter.exportReportsToExcel(
+                  reports: filteredList,
+                  practitionerName: _practitionerName,
+                  dateRange: dateRange,
+                )),
           ),
         ],
       ),
@@ -137,15 +189,17 @@ class ReportsPageState extends State<ReportsPage>
                     itemBuilder: (_, i) {
                       final r = _reports[i];
                       final patientId = r['patient_id'] as int?;
-                      final patientIdFormatted =
-                          patientId != null ? db.formatPatientId(patientId) : 'N/A';
+                      final patientIdFormatted = patientId != null
+                          ? db.formatPatientId(patientId)
+                          : 'N/A';
 
                       String dateString = '';
                       try {
                         final raw = r['analysis_date'] ?? r['record_date'];
                         if (raw is String) {
                           final dt = DateTime.parse(raw);
-                          dateString = DateFormat('yyyy-MM-dd HH:mm').format(dt);
+                          dateString =
+                              DateFormat('yyyy-MM-dd HH:mm').format(dt);
                         }
                       } catch (_) {}
 
@@ -157,13 +211,14 @@ class ReportsPageState extends State<ReportsPage>
                             borderRadius: BorderRadius.circular(12)),
                         clipBehavior: Clip.antiAlias,
                         child: ListTile(
-                          leading:
-                              UIHelpers.getStatusIndicator(r['diagnosis'], size: 12.0),
+                          leading: UIHelpers.getStatusIndicator(r['diagnosis'],
+                              size: 12.0),
                           tileColor: Colors.transparent,
                           splashColor: Colors.transparent,
                           title: Text(
                             '${r['name'] ?? 'Unnamed'}',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600),
                           ),
                           subtitle: Text(
                             'ID: $patientIdFormatted • ${r['diagnosis'] ?? 'Pending'} • $dateString',
@@ -172,7 +227,8 @@ class ReportsPageState extends State<ReportsPage>
                             final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
-                                  builder: (_) => ReportDetailPage(report: r)),
+                                  builder: (_) =>
+                                      ReportDetailPage(report: r)),
                             );
                             if (result == true) {
                               load();

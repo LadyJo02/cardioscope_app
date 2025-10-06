@@ -41,7 +41,7 @@ dependencies:
   provider: ^6.1.5+1                 # State management
   fftea: ^1.5.0+1                    # FFT and audio analysis
   printing: ^5.12.0                  # Print and preview PDFs
-  share_plus: ^7.2.1                 # Share files via native share dialogs  
+  share_plus: ^7.2.2                 # Share files via native share dialogs  
   excel: ^2.1.0                      # Generate Excel reports    
 
 dev_dependencies:

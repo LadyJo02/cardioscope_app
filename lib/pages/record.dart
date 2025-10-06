@@ -1,9 +1,9 @@
-// lib/pages/record.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/services/tflite_service.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/widgets/custom_button.dart';
@@ -11,7 +11,6 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart' as file_recorder;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -100,7 +99,7 @@ class _RecordPageState extends State<RecordPage> {
     await _dataStreamer.startRecorder(
         toStream: _recordingDataController!.sink, codec: Codec.pcm16);
 
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = await Directory.systemTemp.createTemp();
     final tempPath = '${tempDir.path}/temp_recording.wav';
 
     const recordConfig = file_recorder.RecordConfig(
@@ -162,11 +161,15 @@ class _RecordPageState extends State<RecordPage> {
       }
     }
   }
-  
-  Future<void> _askPatientInfoAndSave(String tempPath, Map<String, dynamic>? aiResult) async {
+
+  Future<void> _askPatientInfoAndSave(
+      String tempPath, Map<String, dynamic>? aiResult) async {
     final nameController = TextEditingController();
     final ageController = TextEditingController();
     String gender = "Female";
+
+    final navigator = Navigator.of(context);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -225,8 +228,9 @@ class _RecordPageState extends State<RecordPage> {
       }
       return;
     }
-    
-    if(mounted) {
+
+    // ✅ FIXED: Added a `mounted` check before showing the dialog.
+    if (mounted) {
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -234,6 +238,8 @@ class _RecordPageState extends State<RecordPage> {
           return const Center(child: CircularProgressIndicator());
         },
       );
+    } else {
+      return; // Exit if the widget is no longer on screen
     }
 
     try {
@@ -248,24 +254,30 @@ class _RecordPageState extends State<RecordPage> {
         'gender': result['gender']
       };
 
-      final patientId = await db.findOrCreatePatient(practitionerId, patientData);
+      final patientId =
+          await db.findOrCreatePatient(practitionerId, patientData);
 
-      final docDir = await getApplicationDocumentsDirectory();
-      final storagePath = '${docDir.path}/CardioScope/heart_sounds';
-      await Directory(storagePath).create(recursive: true);
+      final storageService = StorageService();
+      final publicSavePath = await storageService.getSavedPath();
+
+      if (publicSavePath == null) {
+        throw Exception(
+            "Public save folder not selected. Please go back and tap the mic button again.");
+      }
 
       final date = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final safeName = patientName.replaceAll(RegExp(r'\s+'), "_");
-      final newPath = "$storagePath/${safeName}_${patientId}_$date.wav";
+      final newFileName = "${safeName}_${patientId}_$date.wav";
+      final newPublicPath = "$publicSavePath/$newFileName";
 
       final tempFile = File(tempPath);
-      await tempFile.copy(newPath);
+      await tempFile.copy(newPublicPath);
       await tempFile.delete();
 
       final recordDate = DateTime.now();
       final recordId = await db.insertRecord({
         "patient_id": patientId,
-        "file_path": newPath,
+        "file_path": newPublicPath,
         "record_date": recordDate.toIso8601String(),
       });
 
@@ -281,34 +293,31 @@ class _RecordPageState extends State<RecordPage> {
       }
 
       if (!mounted) return;
-      Navigator.pop(context);
+      navigator.pop(); // Pop loading spinner
 
-      // ✅ FIXED: Navigate to the new report page and wait for it to be closed
-      await Navigator.push(
-        context,
+      await navigator.push(
         MaterialPageRoute(
           builder: (_) => ReportGeneratedPage(
             patientId: patientId,
             patientName: patientName,
             patientAge: result['age'],
             patientGender: result['gender'],
-            filePath: newPath,
+            filePath: newPublicPath,
             recordedDate: recordDate,
             classification: aiResult?['label'] ?? 'Error',
-            probabilities: aiResult?['probabilities'] as Map<String, dynamic>? ?? {},
+            probabilities:
+                aiResult?['probabilities'] as Map<String, dynamic>? ?? {},
           ),
         ),
       );
 
-      // ✅ FIXED: After the user closes the report, pop this page and send "true" back.
       if (mounted) {
-        Navigator.pop(context, true);
+        navigator.pop(true);
       }
-
     } catch (e) {
       if (mounted) {
-        Navigator.pop(context); 
-        ScaffoldMessenger.of(context)
+        navigator.pop();
+        scaffoldMessenger
             .showSnackBar(SnackBar(content: Text('Error saving record: $e')));
       }
     }
@@ -380,8 +389,7 @@ class _RecordPageState extends State<RecordPage> {
                   width: ButtonConstants.micButtonSize,
                   height: ButtonConstants.micButtonSize,
                   decoration: BoxDecoration(
-                    color:
-                        _isRecording ? Colors.white : AppColors.primary,
+                    color: _isRecording ? Colors.white : AppColors.primary,
                     shape: BoxShape.circle,
                     border: _isRecording
                         ? Border.all(color: AppColors.primary, width: 4)
