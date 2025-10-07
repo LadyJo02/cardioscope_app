@@ -19,7 +19,6 @@ import 'report_generated.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
-
   @override
   State<RecordPage> createState() => _RecordPageState();
 }
@@ -81,7 +80,7 @@ class _RecordPageState extends State<RecordPage> {
     super.dispose();
   }
 
-  // 🔴 Start / Stop Recording Toggle
+  // 🔴 Start / Stop Recording
   Future<void> _toggleRecording() async {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
@@ -140,13 +139,12 @@ class _RecordPageState extends State<RecordPage> {
 
   void _startAutoStopTimer() {
     _recordingTimer?.cancel();
-    const recordingDuration = Duration(seconds: _recordingDurationInSeconds);
-
-    _recordingTimer = Timer(recordingDuration, () {
-      if (_isRecording && mounted) {
-        _toggleRecording();
-      }
-    });
+    _recordingTimer = Timer(
+      const Duration(seconds: _recordingDurationInSeconds),
+      () {
+        if (_isRecording && mounted) _toggleRecording();
+      },
+    );
   }
 
   // 🛑 Stop recording
@@ -180,47 +178,29 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
-  // 🧩 Dialog for new patient entry
-  Future<Map<String, dynamic>?> _showAnimatedPatientDialog() async {
+  // 🧩 Add or select patient dialog
+  Future<Map<String, dynamic>?> _showPatientDialog({bool switchMode = false}) async {
     return await showGeneralDialog<Map<String, dynamic>>(
       context: context,
-      barrierDismissible: false,
-      barrierLabel: 'Patient Info',
+      barrierDismissible: !switchMode,
+      barrierLabel: switchMode ? 'Switch Patient' : 'Patient Info',
       transitionDuration: const Duration(milliseconds: 250),
-      pageBuilder: (_, __, ___) => const PatientFormDialog(),
-      transitionBuilder: (_, anim, __, child) {
-        return FadeTransition(
-          opacity: anim,
-          child: SlideTransition(
-            position: Tween(begin: const Offset(0, 0.1), end: Offset.zero)
-                .animate(anim),
-            child: child,
-          ),
-        );
-      },
+      pageBuilder: (_, __, ___) =>
+          PatientFormDialog(isSwitchMode: switchMode),
+      transitionBuilder: (_, anim, __, child) => FadeTransition(
+        opacity: anim,
+        child: SlideTransition(
+          position: Tween(begin: const Offset(0, 0.1), end: Offset.zero)
+              .animate(anim),
+          child: child,
+        ),
+      ),
     );
   }
 
-  // 🧩 Dialog for switching existing patient (locked name)
+  // 🧩 Switch Patient
   Future<void> _switchPatient() async {
-    final result = await showGeneralDialog<Map<String, dynamic>>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: 'Switch Patient',
-      transitionDuration: const Duration(milliseconds: 250),
-      pageBuilder: (_, __, ___) => const PatientFormDialog(isSwitchMode: true),
-      transitionBuilder: (_, anim, __, child) {
-        return FadeTransition(
-          opacity: anim,
-          child: SlideTransition(
-            position: Tween(begin: const Offset(0, 0.1), end: Offset.zero)
-                .animate(anim),
-            child: child,
-          ),
-        );
-      },
-    );
-
+    final result = await _showPatientDialog(switchMode: true);
     if (result != null) {
       setState(() => _currentPatient = result);
       await storage.setCurrentPatient(result['patient_id']);
@@ -237,7 +217,7 @@ class _RecordPageState extends State<RecordPage> {
     try {
       Map<String, dynamic>? patient = _currentPatient;
       if (patient == null) {
-        patient = await _showAnimatedPatientDialog();
+        patient = await _showPatientDialog();
         if (patient == null) {
           final tempFile = File(tempPath);
           if (await tempFile.exists()) await tempFile.delete();
@@ -247,23 +227,17 @@ class _RecordPageState extends State<RecordPage> {
       }
 
       final patientId = patient['patient_id'] ?? patient['id'];
-
-      // ✅ Ensure folder exists or create it
       String? folderPath = patient['folder_path'];
+
+      // ensure folder
       if (folderPath == null || folderPath.isEmpty) {
         final basePath = await storage.getSavedPath();
-        if (basePath == null) {
-          throw Exception("No main CardioScope folder found.");
-        }
-
-        folderPath =
-            await storage.createPatientFolder(basePath, patient['name']);
+        if (basePath == null) throw Exception("No main CardioScope folder found.");
+        folderPath = await storage.createPatientFolder(basePath, patient['name']);
         await db.updatePatientFolderPath(patientId, folderPath);
       }
 
-      // ✅ Remember selected patient
       await storage.setCurrentPatient(patientId);
-
       final patientName = patient['name'];
       final safeName = patientName.replaceAll(RegExp(r'[^a-zA-Z0-9_ ]'), "_");
 
@@ -355,16 +329,13 @@ class _RecordPageState extends State<RecordPage> {
 
   @override
   Widget build(BuildContext context) {
-    final String instructionText = _isRecording
+    final instructionText = _isRecording
         ? "Recording... (stops in $_recordingDurationInSeconds s)"
         : "Tap to Start";
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Record Heart Sound',
-          style: TextStyle(color: Colors.white),
-        ),
+        title: const Text('Record Heart Sound', style: TextStyle(color: Colors.white)),
         backgroundColor: AppColors.primary,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
@@ -374,11 +345,7 @@ class _RecordPageState extends State<RecordPage> {
           children: [
             _buildPatientInfoCard(),
             const SizedBox(height: 8),
-            Expanded(
-              child: _isRecording
-                  ? _buildRecordingView()
-                  : _buildGuidelinesView(),
-            ),
+            Expanded(child: _isRecording ? _buildRecordingView() : _buildGuidelinesView()),
             Hero(
               tag: 'record_button_hero',
               child: GestureDetector(
@@ -402,13 +369,10 @@ class _RecordPageState extends State<RecordPage> {
                   ),
                   child: Center(
                     child: _isProcessing
-                        ? const CircularProgressIndicator(
-                            color: AppColors.primary)
+                        ? const CircularProgressIndicator(color: AppColors.primary)
                         : Icon(
                             _isRecording ? Icons.stop_rounded : Icons.mic,
-                            color: _isRecording
-                                ? AppColors.primary
-                                : Colors.white,
+                            color: _isRecording ? AppColors.primary : Colors.white,
                             size: 50,
                           ),
                   ),
@@ -416,17 +380,15 @@ class _RecordPageState extends State<RecordPage> {
               ),
             ),
             const SizedBox(height: 16),
-            Text(
-              instructionText,
-              style: const TextStyle(fontSize: 16, color: Colors.grey),
-            ),
+            Text(instructionText,
+                style: const TextStyle(fontSize: 16, color: Colors.grey)),
           ],
         ),
       ),
     );
   }
 
-  // 🧠 New: Patient Info Card for better UX
+  // 🧠 Patient Info Card
   Widget _buildPatientInfoCard() {
     final name = _currentPatient?['name'];
     final hasPatient = name != null && name.isNotEmpty;
@@ -438,59 +400,51 @@ class _RecordPageState extends State<RecordPage> {
       child: IgnorePointer(
         ignoring: isDisabled,
         child: Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          )
-        ],
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              )
+            ],
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Icon(Icons.person, color: AppColors.primary),
-              const SizedBox(width: 8),
-              Text(
-                hasPatient ? name : "No patient selected",
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                  color: hasPatient ? Colors.black : Colors.grey,
+              Row(children: [
+                const Icon(Icons.person, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Text(
+                  hasPatient ? name : "No patient selected",
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: hasPatient ? Colors.black : Colors.grey,
+                  ),
+                ),
+              ]),
+              TextButton.icon(
+                onPressed: isDisabled ? null : _switchPatient,
+                icon: Icon(Icons.swap_horiz_rounded,
+                    color: isDisabled ? Colors.grey : AppColors.primary),
+                label: Text(
+                  hasPatient ? "Switch" : "Add",
+                  style: TextStyle(
+                    color: isDisabled ? Colors.grey : AppColors.primary,
+                  ),
                 ),
               ),
             ],
           ),
-          TextButton.icon(
-            onPressed: isDisabled ? null : _switchPatient,
-            icon: Icon(
-              Icons.swap_horiz_rounded, 
-              color: isDisabled
-                  ? Colors.grey 
-                  : AppColors.primary,
-            ),
-            label: Text(
-              "Switch",
-              style: TextStyle(
-                color: isDisabled
-                    ? Colors.grey 
-                    : AppColors.primary,
-                ),
-              ),
-            ),
-          ],
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildGuidelinesView() {
     return Padding(
@@ -498,27 +452,21 @@ class _RecordPageState extends State<RecordPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(
-            'Recording Guidelines',
-            style: Theme.of(context)
-                .textTheme
-                .headlineSmall
-                ?.copyWith(fontWeight: FontWeight.bold),
-          ),
+          Text('Recording Guidelines',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
-          SizedBox(
-            height: 180,
-            child: Image.asset('assets/images/mitral_area_guide.png'),
-          ),
+          SizedBox(height: 180, child: Image.asset('assets/images/mitral_area_guide.png')),
           const SizedBox(height: 24),
-          _buildGuidelineItem(
-              Icons.mic_off_rounded, 'Ensure a quiet environment.'),
+          _buildGuidelineItem(Icons.mic_off_rounded, 'Ensure a quiet environment.'),
           _buildGuidelineItem(Icons.place_rounded,
               'Place stethoscope at the mitral area (as shown).'),
-          _buildGuidelineItem(Icons.timer_rounded,
-              'The recording will last $_recordingDurationInSeconds seconds.'),
-          _buildGuidelineItem(Icons.person_rounded,
-              'Ensure the patient remains still during recording.'),
+          _buildGuidelineItem(
+              Icons.timer_rounded, 'The recording will last $_recordingDurationInSeconds seconds.'),
+          _buildGuidelineItem(
+              Icons.person_rounded, 'Ensure the patient remains still during recording.'),
         ],
       ),
     );
@@ -546,10 +494,8 @@ class _RecordPageState extends State<RecordPage> {
             ),
             child: _spots.isEmpty
                 ? const Center(
-                    child: Text(
-                      'Waiting for audio data...',
-                      style: TextStyle(color: Colors.grey),
-                    ),
+                    child: Text('Waiting for audio data...',
+                        style: TextStyle(color: Colors.grey)),
                   )
                 : ClipRRect(
                     borderRadius: BorderRadius.circular(12),
@@ -569,8 +515,6 @@ class _RecordPageState extends State<RecordPage> {
                         ],
                         minY: -1.0,
                         maxY: 1.0,
-                        minX: _spots.isNotEmpty ? _spots.first.x : 0,
-                        maxX: _spots.isNotEmpty ? _spots.last.x : 0,
                         lineTouchData: const LineTouchData(enabled: false),
                       ),
                     ),
@@ -578,10 +522,8 @@ class _RecordPageState extends State<RecordPage> {
           ),
         ),
         const SizedBox(height: 24),
-        Text(
-          _formatDuration(_duration),
-          style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w300),
-        ),
+        Text(_formatDuration(_duration),
+            style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w300)),
       ],
     );
   }
@@ -594,10 +536,7 @@ class _RecordPageState extends State<RecordPage> {
           Icon(icon, color: AppColors.primary, size: 24),
           const SizedBox(width: 16),
           Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(fontSize: 15, height: 1.4),
-            ),
+            child: Text(text, style: const TextStyle(fontSize: 15, height: 1.4)),
           ),
         ],
       ),

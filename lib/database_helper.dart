@@ -196,15 +196,31 @@ class DatabaseHelper {
         where: 'practitioner_id = ?', whereArgs: [practitionerId]);
   }
 
+  // Smart, case-insensitive substring-based search (letter-by-letter)
   Future<List<String>> getPatientSuggestions(String query) async {
+    if (query.isEmpty) {
+      debugPrint("🟡 Empty query → returning []");
+      return [];
+    }
+    
     final db = await database;
-    final result = await db.query(
-      'patients',
-      where: 'name LIKE ?',
-      whereArgs: ['%$query%'],
-      orderBy: 'name ASC',
-      limit: 5,
-    );
+    final lowerQuery = query.toLowerCase();
+
+    // 🧠 Debugging output
+    debugPrint("🔍 Searching for patients starting with: '$query'");
+
+    // Use %query% to match *anywhere* in the name (not just prefix)
+    final result = await db.rawQuery('''
+      SELECT name FROM patients
+      WHERE LOWER(name) LIKE LOWER(?)
+      ORDER BY name ASC
+      LIMIT 10;
+    ''', ['%$lowerQuery%']); // match anywhere in the name
+
+    // 🧠 Debug output for results
+    debugPrint("📋 Found ${result.length} matching patients: "
+        "${result.map((e) => e['name']).toList()}");
+
     return result.map((e) => e['name'] as String).toList();
   }
 
