@@ -1,4 +1,3 @@
-// lib/utils/pdf_exporter.dart
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -18,22 +17,29 @@ import '../database_helper.dart';
 class PdfExporter {
   static final _screenshotController = ScreenshotController();
 
+  // Global date formatter for consistency
+  static final _dateTimeFormat = DateFormat('MMMM d, yyyy – hh:mm a');
+  static final _dateOnlyFormat = DateFormat('MMMM d, yyyy');
+
+  // --------------------------------------------------------------------------
+  // SINGLE REPORT
+  // --------------------------------------------------------------------------
   static Future<void> exportSingleReport({
     required Map<String, dynamic> report,
     required String practitionerName,
   }) async {
     final pdf = pw.Document();
-    final logo = pw.MemoryImage((await rootBundle.load('assets/images/app_logo.png')).buffer.asUint8List());
-    final now = DateFormat('MMMM dd, yyyy – hh:mm a').format(DateTime.now());
+    final logo = pw.MemoryImage(
+        (await rootBundle.load('assets/images/app_logo.png')).buffer.asUint8List());
+    final now = _dateTimeFormat.format(DateTime.now());
     final waveformImage = await _generateWaveformImage(report['file_path']);
 
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         header: (context) => _buildHeader(practitionerName, now, logo),
-        footer: (context) => _buildFooter(context),
+        footer: (context) => _buildFooter(context, practitionerName),
         build: (context) => [
-          // ✅ FIXED: Argument order is now correct
           _buildReportContent(report, waveformImage),
         ],
       ),
@@ -42,18 +48,21 @@ class PdfExporter {
     final dir = await getTemporaryDirectory();
     final file = File("${dir.path}/CardioScope_Report_${DateTime.now().millisecondsSinceEpoch}.pdf");
     await file.writeAsBytes(await pdf.save());
-
     await Share.shareXFiles([XFile(file.path)], text: "CardioScope Report");
   }
 
+  // --------------------------------------------------------------------------
+  // BATCH REPORTS
+  // --------------------------------------------------------------------------
   static Future<void> exportBatchReports({
     required List<Map<String, dynamic>> reports,
     required String practitionerName,
     required DateTimeRange dateRange,
   }) async {
     final pdf = pw.Document();
-    final logo = pw.MemoryImage((await rootBundle.load('assets/images/app_logo.png')).buffer.asUint8List());
-    final now = DateFormat('MMMM dd, yyyy – hh:mm a').format(DateTime.now());
+    final logo = pw.MemoryImage(
+        (await rootBundle.load('assets/images/app_logo.png')).buffer.asUint8List());
+    final now = _dateTimeFormat.format(DateTime.now());
 
     for (final report in reports) {
       final waveformImage = await _generateWaveformImage(report['file_path']);
@@ -61,9 +70,8 @@ class PdfExporter {
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4,
           header: (context) => _buildHeader(practitionerName, now, logo),
-          footer: (context) => _buildFooter(context),
+          footer: (context) => _buildFooter(context, practitionerName),
           build: (context) => [
-            // ✅ FIXED: Argument order is now correct
             _buildReportContent(report, waveformImage),
           ],
         ),
@@ -73,14 +81,18 @@ class PdfExporter {
     final dir = await getTemporaryDirectory();
     final startDate = DateFormat('yyyy-MM-dd').format(dateRange.start);
     final endDate = DateFormat('yyyy-MM-dd').format(dateRange.end);
-    final filename = "CardioScope_Batch_${practitionerName.replaceAll(' ', '_')}_${startDate}_to_$endDate.pdf";
+    final filename =
+        "CardioScope_Batch_${practitionerName.replaceAll(' ', '_')}_${startDate}_to_$endDate.pdf";
     final file = File("${dir.path}/$filename");
     await file.writeAsBytes(await pdf.save());
-
     await Share.shareXFiles([XFile(file.path)], text: "CardioScope Batch Reports");
   }
 
-  static pw.Widget _buildHeader(String practitionerName, String now, pw.MemoryImage logo) {
+  // --------------------------------------------------------------------------
+  // HEADER
+  // --------------------------------------------------------------------------
+  static pw.Widget _buildHeader(
+      String practitionerName, String now, pw.MemoryImage logo) {
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -88,10 +100,16 @@ class PdfExporter {
         pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Text("CardioScope Report", style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF2c3e50))),
+            pw.Text("CardioScope Report",
+                style: pw.TextStyle(
+                    fontSize: 22,
+                    fontWeight: pw.FontWeight.bold,
+                    color: const PdfColor.fromInt(0xFF2c3e50))),
             pw.SizedBox(height: 8),
-            pw.Text("Generated by: $practitionerName", style: const pw.TextStyle(color: PdfColors.grey700)),
-            pw.Text("Date Generated: $now", style: const pw.TextStyle(color: PdfColors.grey700)),
+            pw.Text("Generated by: $practitionerName",
+                style: const pw.TextStyle(color: PdfColors.grey700)),
+            pw.Text("Date Generated: $now",
+                style: const pw.TextStyle(color: PdfColors.grey700)),
           ],
         ),
         pw.SizedBox(height: 50, width: 50, child: pw.Image(logo)),
@@ -99,10 +117,14 @@ class PdfExporter {
     );
   }
 
-  // ✅ FIXED: The function signature parameter order is now correct
-  static pw.Widget _buildReportContent(Map<String, dynamic> report, pw.ImageProvider? waveformImage) {
+  // --------------------------------------------------------------------------
+  // REPORT CONTENT
+  // --------------------------------------------------------------------------
+  static pw.Widget _buildReportContent(
+      Map<String, dynamic> report, pw.ImageProvider? waveformImage) {
     Map<String, dynamic> probs = {};
-    if (report['probabilities'] is String && (report['probabilities'] as String).isNotEmpty) {
+    if (report['probabilities'] is String &&
+        (report['probabilities'] as String).isNotEmpty) {
       try {
         probs = jsonDecode(report['probabilities']);
       } catch (_) {}
@@ -117,8 +139,17 @@ class PdfExporter {
     String recordDateStr = 'N/A';
     if (report['record_date'] != null) {
       try {
-        recordDateStr = DateFormat('MMMM d, yyyy HH:mm').format(DateTime.parse(report['record_date']));
+        recordDateStr = _dateTimeFormat.format(DateTime.parse(report['record_date']));
       } catch (_) {}
+    }
+
+    String birthdayStr = 'N/A';
+    if (report['birthday'] != null && report['birthday'].toString().isNotEmpty) {
+      try {
+        birthdayStr = _dateOnlyFormat.format(DateTime.parse(report['birthday']));
+      } catch (_) {
+        birthdayStr = report['birthday'].toString();
+      }
     }
 
     return pw.Column(
@@ -128,6 +159,7 @@ class PdfExporter {
         _buildSectionHeader("Patient Details"),
         _buildDetailRow("Patient ID:", patientId),
         _buildDetailRow("Name:", report['name'] ?? 'N/A'),
+        _buildDetailRow("Birthday:", birthdayStr),
         _buildDetailRow("Age:", report['age']?.toString() ?? 'N/A'),
         _buildDetailRow("Gender:", report['gender'] ?? 'N/A'),
         pw.SizedBox(height: 20),
@@ -145,14 +177,17 @@ class PdfExporter {
           ),
           child: waveformImage != null
               ? pw.Image(waveformImage, fit: pw.BoxFit.fill)
-              : pw.Center(child: pw.Text("Waveform data not available.", style: const pw.TextStyle(color: PdfColors.grey))),
+              : pw.Center(
+                  child: pw.Text("Waveform data not available.",
+                      style: const pw.TextStyle(color: PdfColors.grey))),
         ),
         pw.SizedBox(height: 20),
         _buildSectionHeader("AI Analysis"),
         _buildDetailRow("Classification:", report['diagnosis'] ?? 'N/A'),
         if (probs.isNotEmpty) ...[
           pw.SizedBox(height: 12),
-          pw.Text("Detailed Breakdown:", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.Text("Detailed Breakdown:",
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 5),
           pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -166,11 +201,18 @@ class PdfExporter {
     );
   }
 
+  // --------------------------------------------------------------------------
+  // SECTION / DETAIL HELPERS
+  // --------------------------------------------------------------------------
   static pw.Widget _buildSectionHeader(String title) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text(title, style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF34495e))),
+        pw.Text(title,
+            style: pw.TextStyle(
+                fontSize: 16,
+                fontWeight: pw.FontWeight.bold,
+                color: const PdfColor.fromInt(0xFF34495e))),
         pw.Divider(height: 8, color: PdfColors.black, thickness: 0.5),
         pw.SizedBox(height: 8),
       ],
@@ -184,7 +226,9 @@ class PdfExporter {
         children: [
           pw.SizedBox(
             width: 120,
-            child: pw.Text(label, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
+            child: pw.Text(label,
+                style: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
           ),
           pw.Expanded(child: pw.Text(value)),
         ],
@@ -192,40 +236,42 @@ class PdfExporter {
     );
   }
 
-  static pw.Widget _buildFooter(pw.Context context) {
+  // --------------------------------------------------------------------------
+  // FOOTER (now includes practitioner line)
+  // --------------------------------------------------------------------------
+  static pw.Widget _buildFooter(pw.Context context, String practitionerName) {
     return pw.Column(
       mainAxisSize: pw.MainAxisSize.min,
       children: [
         pw.Divider(color: PdfColors.grey400, height: 20),
-        pw.Row(
-          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-          children: [
-            pw.Text(
-              "*This AI analysis is a preliminary screening tool and is not a substitute for a professional medical diagnosis.*",
-              style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600, fontStyle: pw.FontStyle.italic),
-            ),
-            pw.Text(
-              "Page ${context.pageNumber} of ${context.pagesCount}",
-              style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
-            ),
-          ],
+        pw.Text(
+          "*This AI analysis is a preliminary screening tool and is not a substitute for a professional medical diagnosis.*",
+          style: pw.TextStyle(
+              fontSize: 8,
+              color: PdfColors.grey600,
+              fontStyle: pw.FontStyle.italic),
         ),
+        pw.Text(
+          "Page ${context.pageNumber} of ${context.pagesCount}",
+          style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
       ],
     );
   }
 
+  // --------------------------------------------------------------------------
+  // WAVEFORM GENERATION
+  // --------------------------------------------------------------------------
   static Future<pw.ImageProvider?> _generateWaveformImage(String? path) async {
     if (path == null) return null;
     final spots = await _loadWaveformData(path);
     if (spots.isEmpty) return null;
-    
-    // ignore: unnecessary_nullable_for_final_variable_declarations
-    final Uint8List? imageBytes = await _screenshotController.captureFromWidget(
+
+    final Uint8List imageBytes = await _screenshotController.captureFromWidget(
       _buildWaveformChart(spots),
       pixelRatio: 2.0,
     );
 
-    return imageBytes != null ? pw.MemoryImage(imageBytes) : null;
+    return pw.MemoryImage(imageBytes);
   }
 
   static Widget _buildWaveformChart(List<FlSpot> spots) {
@@ -259,7 +305,7 @@ class PdfExporter {
     if (!await file.exists()) return [];
     final bytes = await file.readAsBytes();
     if (bytes.lengthInBytes <= 44) return [];
-    
+
     final pcmBytes = bytes.sublist(44);
     final byteData = ByteData.view(pcmBytes.buffer);
     final spots = <FlSpot>[];

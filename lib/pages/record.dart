@@ -13,7 +13,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:intl/intl.dart';
 import 'package:record/record.dart' as file_recorder;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../database_helper.dart';
 import 'report_generated.dart';
@@ -32,6 +31,7 @@ class _RecordPageState extends State<RecordPage> {
   final file_recorder.AudioRecorder _fileRecorder = file_recorder.AudioRecorder();
   final TfliteService _tfliteService = TfliteService();
   final db = DatabaseHelper.instance;
+  final storage = StorageService();
 
   StreamController<Uint8List>? _recordingDataController;
   StreamSubscription? _dataSubscription;
@@ -46,6 +46,8 @@ class _RecordPageState extends State<RecordPage> {
   Timer? _recordingTimer;
   Duration _duration = Duration.zero;
 
+  Map<String, dynamic>? _currentPatient;
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +57,17 @@ class _RecordPageState extends State<RecordPage> {
   Future<void> _init() async {
     await _dataStreamer.openRecorder();
     await _tfliteService.loadModel();
+    await _loadCurrentPatient();
+  }
+
+  Future<void> _loadCurrentPatient() async {
+    final patientId = await storage.getCurrentPatient();
+    if (patientId != null) {
+      final patient = await db.getPatientById(patientId);
+      if (patient != null) {
+        setState(() => _currentPatient = patient);
+      }
+    }
   }
 
   @override
@@ -68,6 +81,7 @@ class _RecordPageState extends State<RecordPage> {
     super.dispose();
   }
 
+  // 🔴 Start / Stop Recording Toggle
   Future<void> _toggleRecording() async {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
@@ -92,13 +106,15 @@ class _RecordPageState extends State<RecordPage> {
     if (mounted) setState(() => _isProcessing = false);
   }
 
+  // 🎙️ Start recording
   Future<void> _startRecording() async {
     _recordingDataController = StreamController<Uint8List>();
-    _dataSubscription =
-        _recordingDataController!.stream.listen(_updateWaveform);
+    _dataSubscription = _recordingDataController!.stream.listen(_updateWaveform);
 
     await _dataStreamer.startRecorder(
-        toStream: _recordingDataController!.sink, codec: Codec.pcm16);
+      toStream: _recordingDataController!.sink,
+      codec: Codec.pcm16,
+    );
 
     final tempDir = await Directory.systemTemp.createTemp();
     final tempPath = '${tempDir.path}/temp_recording.wav';
@@ -133,6 +149,7 @@ class _RecordPageState extends State<RecordPage> {
     });
   }
 
+  // 🛑 Stop recording
   Future<void> _stopRecording() async {
     _recordingTimer?.cancel();
     if (!_dataStreamer.isRecording) return;
@@ -155,7 +172,7 @@ class _RecordPageState extends State<RecordPage> {
 
         if (mounted) {
           setState(() => _isProcessing = false);
-          await _askPatientInfoAndSave(path, result);
+          await _handleRecordingSave(path, result);
         }
       } else {
         setState(() => _isProcessing = false);
@@ -163,73 +180,101 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
-  // ✅ Smart Patient Info Dialog Integration
-  Future<void> _askPatientInfoAndSave(
-      String tempPath, Map<String, dynamic>? aiResult) async {
-    final navigator = Navigator.of(context);
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
-    // Step 1: Ask for patient info
-    final result = await showDialog<Map<String, dynamic>>(
+  // 🧩 Dialog for new patient entry
+  Future<Map<String, dynamic>?> _showAnimatedPatientDialog() async {
+    return await showGeneralDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const PatientFormDialog(),
+      barrierLabel: 'Patient Info',
+      transitionDuration: const Duration(milliseconds: 250),
+      pageBuilder: (_, __, ___) => const PatientFormDialog(),
+      transitionBuilder: (_, anim, __, child) {
+        return FadeTransition(
+          opacity: anim,
+          child: SlideTransition(
+            position: Tween(begin: const Offset(0, 0.1), end: Offset.zero)
+                .animate(anim),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  // 🧩 Dialog for switching existing patient (locked name)
+  Future<void> _switchPatient() async {
+    final result = await showGeneralDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Switch Patient',
+      transitionDuration: const Duration(milliseconds: 250),
+      pageBuilder: (_, __, ___) => const PatientFormDialog(isSwitchMode: true),
+      transitionBuilder: (_, anim, __, child) {
+        return FadeTransition(
+          opacity: anim,
+          child: SlideTransition(
+            position: Tween(begin: const Offset(0, 0.1), end: Offset.zero)
+                .animate(anim),
+            child: child,
+          ),
+        );
+      },
     );
 
-    if (result == null) {
-      try {
-        final tempFile = File(tempPath);
-        if (await tempFile.exists()) await tempFile.delete();
-      } catch (_) {}
-      return;
-    }
-
-    // Show loading spinner
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const Center(child: CircularProgressIndicator()),
+    if (result != null) {
+      setState(() => _currentPatient = result);
+      await storage.setCurrentPatient(result['patient_id']);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Switched to patient: ${result['name']}')),
       );
     }
+  }
 
+  // 💾 Save recording and analysis
+  Future<void> _handleRecordingSave(
+      String tempPath, Map<String, dynamic>? aiResult) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final practitionerId = prefs.getInt('practitioner_id');
-      if (practitionerId == null) throw Exception("Not logged in.");
-
-      final patientName = result['name'].isEmpty ? 'Unnamed' : result['name'];
-      final patientData = {
-        'name': patientName,
-        'birthday': result['birthday'],
-        'age': DateTime.now().year -
-            DateTime.parse(result['birthday']).year,
-        'gender': result['gender'],
-      };
-
-      final patientId = await db.findOrCreatePatient(practitionerId, patientData);
-
-      final storageService = StorageService();
-      final publicSavePath = await storageService.getSavedPath();
-      if (publicSavePath == null) {
-        throw Exception("Public save folder not selected. Please go back and tap the mic button again.");
+      Map<String, dynamic>? patient = _currentPatient;
+      if (patient == null) {
+        patient = await _showAnimatedPatientDialog();
+        if (patient == null) {
+          final tempFile = File(tempPath);
+          if (await tempFile.exists()) await tempFile.delete();
+          return;
+        }
+        setState(() => _currentPatient = patient);
       }
 
-      // Step 2: Create Patient Folder
-      final safeName = patientName.replaceAll(RegExp(r'[^a-zA-Z0-9_ ]'), "_");
-      final patientFolder = "$publicSavePath/$safeName";
-      await Directory(patientFolder).create(recursive: true);
+      final patientId = patient['patient_id'] ?? patient['id'];
 
-      // Step 3: Save recording
+      // ✅ Ensure folder exists or create it
+      String? folderPath = patient['folder_path'];
+      if (folderPath == null || folderPath.isEmpty) {
+        final basePath = await storage.getSavedPath();
+        if (basePath == null) {
+          throw Exception("No main CardioScope folder found.");
+        }
+
+        folderPath =
+            await storage.createPatientFolder(basePath, patient['name']);
+        await db.updatePatientFolderPath(patientId, folderPath);
+      }
+
+      // ✅ Remember selected patient
+      await storage.setCurrentPatient(patientId);
+
+      final patientName = patient['name'];
+      final safeName = patientName.replaceAll(RegExp(r'[^a-zA-Z0-9_ ]'), "_");
+
       final date = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final newFileName = "${safeName}_${patientId}_$date.wav";
-      final newPublicPath = "$patientFolder/$newFileName";
+      final newPublicPath = "$folderPath/$newFileName";
 
       final tempFile = File(tempPath);
       await tempFile.copy(newPublicPath);
       await tempFile.delete();
 
-      // Step 4: Save record in DB
       final recordDate = DateTime.now();
       final recordId = await db.insertRecord({
         "patient_id": patientId,
@@ -249,15 +294,13 @@ class _RecordPageState extends State<RecordPage> {
       }
 
       if (!mounted) return;
-      navigator.pop(); // close spinner
-
-      await navigator.push(
+      await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ReportGeneratedPage(
             patientId: patientId,
             patientName: patientName,
-            patientAge: patientData['age'],
-            patientGender: patientData['gender'],
+            patientAge: patient?['age'] ?? '-',
+            patientGender: patient?['gender'] ?? '-',
             filePath: newPublicPath,
             recordedDate: recordDate,
             classification: aiResult?['label'] ?? 'Error',
@@ -266,19 +309,15 @@ class _RecordPageState extends State<RecordPage> {
           ),
         ),
       );
-
-      if (mounted) navigator.pop(true);
     } catch (e) {
-      if (mounted) {
-        navigator.pop();
-        scaffoldMessenger.showSnackBar(
-          SnackBar(content: Text('Error saving record: $e')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error saving record: $e')),
+      );
     }
   }
 
-  // ===== Waveform Visualization Logic =====
+  // ===== Waveform Logic =====
   void _updateWaveform(Uint8List rawData) {
     final byteData = rawData.buffer.asByteData();
     final samples = <double>[];
@@ -322,16 +361,19 @@ class _RecordPageState extends State<RecordPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Record Heart Sound',
-            style: TextStyle(color: Colors.white)),
+        title: const Text(
+          'Record Heart Sound',
+          style: TextStyle(color: Colors.white),
+        ),
         backgroundColor: AppColors.primary,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 24.0),
+        padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
+            _buildPatientInfoCard(),
+            const SizedBox(height: 8),
             Expanded(
               child: _isRecording
                   ? _buildRecordingView()
@@ -352,9 +394,10 @@ class _RecordPageState extends State<RecordPage> {
                         : null,
                     boxShadow: [
                       BoxShadow(
-                          color: Colors.black.withAlpha(40),
-                          blurRadius: 8,
-                          offset: const Offset(0, 4))
+                        color: Colors.black.withAlpha(40),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      )
                     ],
                   ),
                   child: Center(
@@ -366,19 +409,88 @@ class _RecordPageState extends State<RecordPage> {
                             color: _isRecording
                                 ? AppColors.primary
                                 : Colors.white,
-                            size: 50),
+                            size: 50,
+                          ),
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
-            Text(instructionText,
-                style: const TextStyle(fontSize: 16, color: Colors.grey)),
+            Text(
+              instructionText,
+              style: const TextStyle(fontSize: 16, color: Colors.grey),
+            ),
           ],
         ),
       ),
     );
   }
+
+  // 🧠 New: Patient Info Card for better UX
+  Widget _buildPatientInfoCard() {
+    final name = _currentPatient?['name'];
+    final hasPatient = name != null && name.isNotEmpty;
+    final isDisabled = _isRecording || _isProcessing;
+
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 300),
+      opacity: isDisabled ? 0.5 : 1.0,
+      child: IgnorePointer(
+        ignoring: isDisabled,
+        child: Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          )
+        ],
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.person, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Text(
+                hasPatient ? name : "No patient selected",
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: hasPatient ? Colors.black : Colors.grey,
+                ),
+              ),
+            ],
+          ),
+          TextButton.icon(
+            onPressed: isDisabled ? null : _switchPatient,
+            icon: Icon(
+              Icons.swap_horiz_rounded, 
+              color: isDisabled
+                  ? Colors.grey 
+                  : AppColors.primary,
+            ),
+            label: Text(
+              "Switch",
+              style: TextStyle(
+                color: isDisabled
+                    ? Colors.grey 
+                    : AppColors.primary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
 
   Widget _buildGuidelinesView() {
     return Padding(
@@ -404,7 +516,7 @@ class _RecordPageState extends State<RecordPage> {
           _buildGuidelineItem(Icons.place_rounded,
               'Place stethoscope at the mitral area (as shown).'),
           _buildGuidelineItem(Icons.timer_rounded,
-              'The recording will last $_recordingDurationInSeconds seconds for a complete analysis.'),
+              'The recording will last $_recordingDurationInSeconds seconds.'),
           _buildGuidelineItem(Icons.person_rounded,
               'Ensure the patient remains still during recording.'),
         ],
@@ -482,8 +594,11 @@ class _RecordPageState extends State<RecordPage> {
           Icon(icon, color: AppColors.primary, size: 24),
           const SizedBox(width: 16),
           Expanded(
-              child: Text(text,
-                  style: const TextStyle(fontSize: 15, height: 1.4))),
+            child: Text(
+              text,
+              style: const TextStyle(fontSize: 15, height: 1.4),
+            ),
+          ),
         ],
       ),
     );

@@ -23,6 +23,7 @@ class ReportGeneratedPage extends StatefulWidget {
   final DateTime recordedDate;
   final String classification;
   final Map<String, dynamic> probabilities;
+  final String? patientBirthday; // ✅ new field
 
   const ReportGeneratedPage({
     super.key,
@@ -34,6 +35,7 @@ class ReportGeneratedPage extends StatefulWidget {
     required this.recordedDate,
     required this.classification,
     required this.probabilities,
+    this.patientBirthday, // ✅ optional
   });
 
   @override
@@ -50,14 +52,15 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     super.initState();
     _waveformFuture = _loadWaveformData();
     _initAudioPlayer();
-    _loadPractitionerName(); 
+    _loadPractitionerName();
   }
 
   Future<void> _loadPractitionerName() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
       setState(() {
-        _practitionerName = prefs.getString('practitioner_name') ?? 'Practitioner';
+        _practitionerName =
+            prefs.getString('practitioner_name') ?? 'Practitioner';
       });
     }
   }
@@ -87,9 +90,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     final byteData = ByteData.view(pcmBytes.buffer);
     final spots = <FlSpot>[];
     const int downsamplingFactor = 50;
-    for (int i = 0;
-        i < pcmBytes.lengthInBytes;
-        i += (2 * downsamplingFactor)) {
+    for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsamplingFactor)) {
       if (i + 2 <= pcmBytes.lengthInBytes) {
         final sample = byteData.getInt16(i, Endian.little) / 32768.0;
         spots.add(FlSpot((i / 2).toDouble(), sample));
@@ -97,7 +98,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     }
     return spots;
   }
-  
+
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -106,7 +107,19 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
 
   @override
   Widget build(BuildContext context) {
-    final patientIdFormatted = DatabaseHelper.instance.formatPatientId(widget.patientId);
+    final patientIdFormatted =
+        DatabaseHelper.instance.formatPatientId(widget.patientId);
+
+    // ✅ Format birthday if available
+    String birthdayDisplay = "-";
+    if (widget.patientBirthday != null && widget.patientBirthday!.isNotEmpty) {
+      try {
+        final parsed = DateTime.parse(widget.patientBirthday!);
+        birthdayDisplay = DateFormat('MMMM d, yyyy').format(parsed);
+      } catch (_) {
+        birthdayDisplay = widget.patientBirthday!;
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -120,7 +133,8 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Center(
               child: Text('Analysis Complete!',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -128,7 +142,8 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           const SizedBox(height: 16),
           Card(
             elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -142,19 +157,23 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                     const Divider(height: 20),
                     _buildDetailRow("Patient ID:", patientIdFormatted),
                     _buildDetailRow("Name:", widget.patientName),
+                    _buildDetailRow("Birthday:", birthdayDisplay), // ✅ added
                     _buildDetailRow("Age:", widget.patientAge.toString()),
                     _buildDetailRow("Gender:", widget.patientGender),
                     _buildDetailRow("File Location:", widget.filePath,
                         isSelectable: true),
-                    _buildDetailRow("Recorded:",
-                        DateFormat('MMMM d, yyyy HH:mm').format(widget.recordedDate)),
+                    _buildDetailRow(
+                        "Recorded:",
+                        DateFormat('MMMM d, yyyy HH:mm')
+                            .format(widget.recordedDate)),
                   ]),
             ),
           ),
           const SizedBox(height: 16),
           Card(
             elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -224,14 +243,16 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                   const SizedBox(height: 10),
                   const Text("Detailed Breakdown:",
                       style: TextStyle(
-                          fontWeight: FontWeight.bold, color: Colors.black54)),
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black54)),
                   const SizedBox(height: 8),
                   if (widget.probabilities.isEmpty)
                     const Text("No probabilities available",
                         style: TextStyle(color: Colors.black54))
                   else
                     ...widget.probabilities.entries.map((entry) {
-                      return _buildProbabilityRow(entry.key, entry.value as double);
+                      return _buildProbabilityRow(
+                          entry.key, entry.value as double);
                     }),
                 ],
               ),
@@ -242,11 +263,11 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
-          // ✅ FIXED: The call is now simpler and correct.
           await PdfExporter.exportSingleReport(
             report: {
               'patient_id': widget.patientId,
               'name': widget.patientName,
+              'birthday': widget.patientBirthday ?? '',
               'age': widget.patientAge,
               'gender': widget.patientGender,
               'file_path': widget.filePath,
@@ -258,7 +279,8 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           );
         },
         icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
-        label: const Text("Export PDF", style: TextStyle(color: Colors.white)),
+        label: const Text("Export PDF",
+            style: TextStyle(color: Colors.white)),
         backgroundColor: AppColors.primary,
       ),
     );
@@ -341,8 +363,8 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
         children: [
           Expanded(
               flex: 2,
-              child: Text(label,
-                  style: TextStyle(color: Colors.grey.shade700))),
+              child:
+                  Text(label, style: TextStyle(color: Colors.grey.shade700))),
           Expanded(
             flex: 5,
             child: LinearProgressIndicator(
@@ -362,7 +384,8 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     );
   }
 
-  Widget _buildDetailRow(String label, String value, {bool isSelectable = false}) {
+  Widget _buildDetailRow(String label, String value,
+      {bool isSelectable = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

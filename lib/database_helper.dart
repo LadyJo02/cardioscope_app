@@ -7,7 +7,7 @@ import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
   static const _databaseName = "cardioscope.db";
-  static const _databaseVersion = 5; // ⬆ bumped to trigger migration
+  static const _databaseVersion = 5; // bump when schema changes
 
   DatabaseHelper._privateConstructor();
   static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
@@ -49,7 +49,9 @@ class DatabaseHelper {
         age INTEGER,
         gender TEXT,
         folder_path TEXT,
-        FOREIGN KEY (practitioner_id) REFERENCES practitioners (practitioner_id) ON DELETE CASCADE
+        FOREIGN KEY (practitioner_id)
+          REFERENCES practitioners (practitioner_id)
+          ON DELETE CASCADE
       );
     ''');
 
@@ -59,7 +61,9 @@ class DatabaseHelper {
         patient_id INTEGER NOT NULL,
         file_path TEXT NOT NULL,
         record_date TEXT,
-        FOREIGN KEY (patient_id) REFERENCES patients (patient_id) ON DELETE CASCADE
+        FOREIGN KEY (patient_id)
+          REFERENCES patients (patient_id)
+          ON DELETE CASCADE
       );
     ''');
 
@@ -70,7 +74,9 @@ class DatabaseHelper {
         diagnosis TEXT,
         probabilities TEXT,
         analysis_date TEXT,
-        FOREIGN KEY (record_id) REFERENCES heart_sound_records (record_id) ON DELETE CASCADE
+        FOREIGN KEY (record_id)
+          REFERENCES heart_sound_records (record_id)
+          ON DELETE CASCADE
       );
     ''');
 
@@ -83,10 +89,11 @@ class DatabaseHelper {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // --- add new columns for earlier versions ---
     if (oldVersion < 2) {
-      await db.execute("ALTER TABLE practitioners ADD COLUMN security_question TEXT;");
-      await db.execute("ALTER TABLE practitioners ADD COLUMN security_answer TEXT;");
+      await db.execute(
+          "ALTER TABLE practitioners ADD COLUMN security_question TEXT;");
+      await db.execute(
+          "ALTER TABLE practitioners ADD COLUMN security_answer TEXT;");
     }
 
     if (oldVersion < 3) {
@@ -94,7 +101,7 @@ class DatabaseHelper {
       await db.execute("ALTER TABLE patients ADD COLUMN folder_path TEXT;");
     }
 
-    // --- Always verify and correct the settings table ---
+    // ensure proper settings table structure
     final cols = await db.rawQuery("PRAGMA table_info(settings);");
     final colNames = cols.map((c) => c['name'] as String).toList();
 
@@ -102,10 +109,7 @@ class DatabaseHelper {
       debugPrint('⚠️ Found typo column `vaalue` → rebuilding settings table...');
       await db.execute('ALTER TABLE settings RENAME TO settings_old;');
       await db.execute('''
-        CREATE TABLE settings (
-          key TEXT PRIMARY KEY,
-          value TEXT
-        );
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
       ''');
       await db.execute('''
         INSERT INTO settings (key, value)
@@ -123,7 +127,7 @@ class DatabaseHelper {
     }
   }
 
-  // ---------------- CRUD methods ----------------
+  // ---------------- PRACTITIONERS ----------------
 
   Future<List<Map<String, dynamic>>> getAllPractitioners() async {
     final db = await database;
@@ -138,15 +142,19 @@ class DatabaseHelper {
 
   Future<Map<String, dynamic>?> getPractitioner(String name, String pin) async {
     final db = await database;
-    final res = await db.query('practitioners',
-        where: 'name = ? AND pin = ?', whereArgs: [name, pin], limit: 1);
+    final res = await db.query(
+      'practitioners',
+      where: 'name = ? AND pin = ?',
+      whereArgs: [name, pin],
+      limit: 1,
+    );
     return res.isNotEmpty ? res.first : null;
   }
 
   Future<Map<String, dynamic>?> getPractitionerByName(String name) async {
     final db = await database;
-    final res = await db
-        .query('practitioners', where: 'name = ?', whereArgs: [name], limit: 1);
+    final res = await db.query('practitioners',
+        where: 'name = ?', whereArgs: [name], limit: 1);
     return res.isNotEmpty ? res.first : null;
   }
 
@@ -156,9 +164,12 @@ class DatabaseHelper {
         where: 'practitioner_id = ?', whereArgs: [id]);
   }
 
+  // ---------------- PATIENTS ----------------
+
   Future<int> findOrCreatePatient(
       int practitionerId, Map<String, dynamic> patientData) async {
     final db = await database;
+
     final existing = await db.query(
       'patients',
       where:
@@ -170,7 +181,11 @@ class DatabaseHelper {
         patientData['gender']
       ],
     );
-    if (existing.isNotEmpty) return existing.first['patient_id'] as int;
+
+    if (existing.isNotEmpty) {
+      return existing.first['patient_id'] as int;
+    }
+
     patientData['practitioner_id'] = practitionerId;
     return db.insert('patients', patientData);
   }
@@ -181,12 +196,49 @@ class DatabaseHelper {
         where: 'practitioner_id = ?', whereArgs: [practitionerId]);
   }
 
-  Future<int> updatePatientFolderPath(
-      int patientId, String folderPath) async {
+  Future<List<String>> getPatientSuggestions(String query) async {
+    final db = await database;
+    final result = await db.query(
+      'patients',
+      where: 'name LIKE ?',
+      whereArgs: ['%$query%'],
+      orderBy: 'name ASC',
+      limit: 5,
+    );
+    return result.map((e) => e['name'] as String).toList();
+  }
+
+  Future<Map<String, dynamic>?> getPatientDetails(String name) async {
+    final db = await database;
+    final result = await db.query(
+      'patients',
+      where: 'name = ?',
+      whereArgs: [name],
+      limit: 1,
+    );
+    return result.isNotEmpty ? result.first : null;
+  }
+
+/// Retrieve patient by ID (used for reloading current patient)
+  Future<Map<String, dynamic>?> getPatientById(int patientId) async {
+    final db = await database;
+    final result = await db.query(
+      'patients',
+      where: 'patient_id = ?',
+      whereArgs: [patientId],
+      limit: 1,
+    );
+    return result.isNotEmpty ? result.first : null;
+  } 
+
+
+  Future<int> updatePatientFolderPath(int patientId, String folderPath) async {
     final db = await database;
     return db.update('patients', {'folder_path': folderPath},
         where: 'patient_id = ?', whereArgs: [patientId]);
   }
+
+  // ---------------- RECORDS & ANALYSIS ----------------
 
   Future<int> insertRecord(Map<String, dynamic> record) async {
     final db = await database;
@@ -198,6 +250,7 @@ class DatabaseHelper {
     return db.insert('mitral_valve_analysis', analysis);
   }
 
+  /// Original method used by exports and reports filtering
   Future<List<Map<String, dynamic>>> getAllReports(int practitionerId,
       {DateTime? startDate, DateTime? endDate}) async {
     final db = await database;
@@ -227,6 +280,25 @@ class DatabaseHelper {
     ''', whereArgs);
   }
 
+  /// ✅ NEW: used by ReportsPage to load joined patient data easily
+  Future<List<Map<String, dynamic>>> getAllReportsWithPatients(
+      int practitionerId) async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT 
+        p.patient_id, p.name, p.birthday, p.age, p.gender, p.folder_path,
+        r.record_id, r.file_path, r.record_date,
+        a.analysis_id, a.diagnosis, a.probabilities, a.analysis_date
+      FROM patients p
+      JOIN heart_sound_records r ON p.patient_id = r.patient_id
+      LEFT JOIN mitral_valve_analysis a ON r.record_id = a.record_id
+      WHERE p.practitioner_id = ?
+      ORDER BY r.record_date DESC;
+    ''', [practitionerId]);
+  }
+
+  // ---------------- SETTINGS ----------------
+
   Future<void> saveSetting(String key, String value) async {
     final db = await database;
     await db.insert('settings', {'key': key, 'value': value},
@@ -235,14 +307,16 @@ class DatabaseHelper {
 
   Future<String?> getSetting(String key) async {
     final db = await database;
-    final result = await db.query('settings', where: 'key = ?', whereArgs: [key]);
-    return result.isNotEmpty ? result.first['value'] as String : null;
+    final res = await db.query('settings', where: 'key = ?', whereArgs: [key]);
+    return res.isNotEmpty ? res.first['value'] as String : null;
   }
 
   Future<void> deleteSetting(String key) async {
     final db = await database;
     await db.delete('settings', where: 'key = ?', whereArgs: [key]);
   }
+
+  // ---------------- UTILITIES ----------------
 
   Future<void> verifyDatabaseStructure() async {
     final db = await database;

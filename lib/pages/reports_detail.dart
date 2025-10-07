@@ -126,6 +126,18 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                     _buildDetailRow('Patient ID:', patientIdFormatted),
                     _buildDetailRow('Name:', widget.report['name'] ?? 'Unnamed'),
                     _buildDetailRow(
+                      'Birthday:',
+                      (() {
+                        final bday = widget.report['birthday'];
+                        if (bday == null || bday.toString().isEmpty) return 'N/A';
+                        try {
+                          return DateFormat('MMMM d, yyyy').format(DateTime.parse(bday));
+                        } catch (_) {
+                          return bday.toString();
+                        } 
+                      })(),
+                    ),
+                    _buildDetailRow(
                         'Age:', widget.report['age']?.toString() ?? 'N/A'),
                     _buildDetailRow('Gender:', widget.report['gender'] ?? 'N/A'),
                     _buildDetailRow('File:',
