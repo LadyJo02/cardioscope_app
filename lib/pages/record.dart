@@ -19,6 +19,7 @@ import 'report_generated.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
+
   @override
   State<RecordPage> createState() => _RecordPageState();
 }
@@ -63,7 +64,7 @@ class _RecordPageState extends State<RecordPage> {
     final patientId = await storage.getCurrentPatient();
     if (patientId != null) {
       final patient = await db.getPatientById(patientId);
-      if (patient != null) {
+      if (patient != null && mounted) {
         setState(() => _currentPatient = patient);
       }
     }
@@ -87,11 +88,10 @@ class _RecordPageState extends State<RecordPage> {
 
     final hasPermission = await _fileRecorder.hasPermission();
     if (!hasPermission) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission required.')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Microphone permission required.')),
+      );
       setState(() => _isProcessing = false);
       return;
     }
@@ -159,22 +159,21 @@ class _RecordPageState extends State<RecordPage> {
     _recordingDataController?.close();
     _stopTimer();
 
-    if (mounted) {
-      setState(() {
-        _isRecording = false;
-        _isProcessing = true;
-      });
+    if (!mounted) return;
 
-      if (path != null) {
-        final result = await _tfliteService.runInference(filePath: path);
+    setState(() {
+      _isRecording = false;
+      _isProcessing = true;
+    });
 
-        if (mounted) {
-          setState(() => _isProcessing = false);
-          await _handleRecordingSave(path, result);
-        }
-      } else {
-        setState(() => _isProcessing = false);
-      }
+    if (path != null) {
+      final result = await _tfliteService.runInference(filePath: path);
+
+      if (!mounted) return;
+      setState(() => _isProcessing = false);
+      await _handleRecordingSave(path, result);
+    } else {
+      setState(() => _isProcessing = false);
     }
   }
 
@@ -201,7 +200,9 @@ class _RecordPageState extends State<RecordPage> {
   // 🧩 Switch Patient
   Future<void> _switchPatient() async {
     final result = await _showPatientDialog(switchMode: true);
-    if (result != null) {
+    if (!mounted) return;
+
+    if (result != null && mounted) {
       setState(() => _currentPatient = result);
       await storage.setCurrentPatient(result['patient_id']);
       if (!mounted) return;
@@ -212,8 +213,7 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   // 💾 Save recording and analysis
-  Future<void> _handleRecordingSave(
-      String tempPath, Map<String, dynamic>? aiResult) async {
+  Future<void> _handleRecordingSave(String tempPath, Map<String, dynamic>? aiResult) async {
     try {
       Map<String, dynamic>? patient = _currentPatient;
       if (patient == null) {
@@ -229,7 +229,7 @@ class _RecordPageState extends State<RecordPage> {
       final patientId = patient['patient_id'] ?? patient['id'];
       String? folderPath = patient['folder_path'];
 
-      // ensure folder
+      // Ensure folder
       if (folderPath == null || folderPath.isEmpty) {
         final basePath = await storage.getSavedPath();
         if (basePath == null) throw Exception("No main CardioScope folder found.");
@@ -268,7 +268,8 @@ class _RecordPageState extends State<RecordPage> {
       }
 
       if (!mounted) return;
-      await Navigator.of(context).push(
+
+      final result = await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ReportGeneratedPage(
             patientId: patientId,
@@ -283,6 +284,11 @@ class _RecordPageState extends State<RecordPage> {
           ),
         ),
       );
+
+      // ✅ Refresh ReportsPage after returning
+      if (result == true && mounted) {
+        debugPrint("🟢 Triggering reports refresh after new record");
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

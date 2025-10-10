@@ -1,4 +1,6 @@
+// lib/pages/reports.dart
 import 'dart:io';
+
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:flutter/material.dart';
@@ -31,7 +33,7 @@ class ReportsPageState extends State<ReportsPage>
   String _practitionerName = "";
   int? _practitionerId;
   bool _isLoading = true;
-  String? _selectedPatient;
+  String? _selectedPatient = 'All';
   String _searchQuery = "";
 
   @override
@@ -43,26 +45,54 @@ class ReportsPageState extends State<ReportsPage>
   Future<void> load() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
+    debugPrint("🔄 Loading reports data...");
 
-    final prefs = await SharedPreferences.getInstance();
-    _practitionerId = prefs.getInt('practitioner_id');
-    _practitionerName = prefs.getString('practitioner_name') ?? "Practitioner";
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _practitionerId = prefs.getInt('practitioner_id');
+      _practitionerName = prefs.getString('practitioner_name') ?? "Practitioner";
 
-    if (_practitionerId == null) {
-      if (mounted) setState(() => _isLoading = false);
-      return;
-    }
+      if (_practitionerId == null) {
+        if (mounted) setState(() => _isLoading = false);
+        debugPrint("⚠️ No practitioner ID found. Aborting load.");
+        return;
+      }
 
-    final data = await db.getAllReportsWithPatients(_practitionerId!);
-    final patients = await db.getAllPatients(_practitionerId!);
+      debugPrint("🔍 Fetching reports for practitioner ID: $_practitionerId");
+      final dbData = await db.getAllReportsWithPatients(_practitionerId!);
+      debugPrint("✅ Fetched ${dbData.length} reports.");
 
-    if (mounted) {
-      setState(() {
-        _reports = data;
-        _patients = patients;
-        _filteredReports = _reports;
-        _isLoading = false;
+      debugPrint("🔍 Fetching all patients...");
+      final patients = await db.getAllPatients(_practitionerId!);
+      debugPrint("✅ Fetched ${patients.length} patients.");
+
+      // ✅ FIX: Create a mutable copy of the list before sorting
+      final data = List<Map<String, dynamic>>.from(dbData);
+
+      // Sort newest first
+      data.sort((a, b) {
+        final da = DateTime.tryParse(a['record_date'] ?? '') ?? DateTime(2000);
+        final dbb = DateTime.tryParse(b['record_date'] ?? '') ?? DateTime(2000);
+        return dbb.compareTo(da);
       });
+
+      if (mounted) {
+        setState(() {
+          _reports = data;
+          _patients = patients;
+          _filteredReports = data;
+          _isLoading = false;
+        });
+        debugPrint("🟢 UI updated successfully.");
+      }
+    } catch (e) {
+      debugPrint("🔴 ERROR loading reports: $e");
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error loading reports: $e")),
+        );
+      }
     }
   }
 
@@ -70,11 +100,17 @@ class ReportsPageState extends State<ReportsPage>
     setState(() {
       _filteredReports = _reports.where((r) {
         final name = (r['name'] ?? '').toString().toLowerCase();
+        
         final matchesSearch =
             _searchQuery.isEmpty || name.contains(_searchQuery.toLowerCase());
+        
+        final selectedPatientName = _patients
+            .firstWhere((p) => p['name'] == _selectedPatient, orElse: () => {})['name'];
+
         final matchesPatient = _selectedPatient == null ||
             _selectedPatient == 'All' ||
-            name == _selectedPatient;
+            r['name'] == selectedPatientName;
+
         return matchesSearch && matchesPatient;
       }).toList();
     });
@@ -84,6 +120,7 @@ class ReportsPageState extends State<ReportsPage>
     Future<void> Function(List<Map<String, dynamic>>, DateTimeRange)
         exportFunction,
   ) async {
+    if (!mounted) return;
     final scaffold = ScaffoldMessenger.of(context);
     final picked = await showDateRangePicker(
       context: context,
@@ -113,6 +150,7 @@ class ReportsPageState extends State<ReportsPage>
 
   Future<void> _exportWavFiles(
       List<Map<String, dynamic>> filtered, DateTimeRange range) async {
+    if (!mounted) return;
     final scaffold = ScaffoldMessenger.of(context);
     showDialog(
       context: context,
@@ -183,7 +221,6 @@ class ReportsPageState extends State<ReportsPage>
               onRefresh: load,
               child: Column(
                 children: [
-                  // 🔍 Search and filter row
                   Padding(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -194,6 +231,9 @@ class ReportsPageState extends State<ReportsPage>
                             decoration: const InputDecoration(
                               prefixIcon: Icon(Icons.search),
                               hintText: 'Search patient name...',
+                              border: OutlineInputBorder(
+                                  borderRadius:
+                                      BorderRadius.all(Radius.circular(12))),
                             ),
                             onChanged: (val) {
                               _searchQuery = val;
@@ -203,7 +243,7 @@ class ReportsPageState extends State<ReportsPage>
                         ),
                         const SizedBox(width: 12),
                         DropdownButton<String>(
-                          value: _selectedPatient ?? 'All',
+                          value: _selectedPatient,
                           items: [
                             const DropdownMenuItem(
                                 value: 'All', child: Text('All Patients')),
@@ -213,7 +253,9 @@ class ReportsPageState extends State<ReportsPage>
                                 )),
                           ],
                           onChanged: (val) {
-                            _selectedPatient = val;
+                            setState(() {
+                              _selectedPatient = val;
+                            });
                             _applyFilters();
                           },
                         ),
@@ -224,7 +266,7 @@ class ReportsPageState extends State<ReportsPage>
                     child: _filteredReports.isEmpty
                         ? const Center(child: Text('No reports found.'))
                         : ListView.builder(
-                            padding: const EdgeInsets.all(16),
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                             itemCount: _filteredReports.length,
                             itemBuilder: (_, i) {
                               final r = _filteredReports[i];
@@ -235,11 +277,12 @@ class ReportsPageState extends State<ReportsPage>
                               String date = '';
                               try {
                                 final raw = r['analysis_date'] ?? r['record_date'];
-                                if (raw is String) {
+                                if (raw is String && raw.isNotEmpty) {
                                   date = DateFormat('yyyy-MM-dd HH:mm')
                                       .format(DateTime.parse(raw));
                                 }
                               } catch (_) {}
+
                               return Card(
                                 color: Colors.white,
                                 elevation: 2,
@@ -249,8 +292,7 @@ class ReportsPageState extends State<ReportsPage>
                                     borderRadius: BorderRadius.circular(12)),
                                 child: ListTile(
                                   leading: UIHelpers.getStatusIndicator(
-                                      r['diagnosis'],
-                                      size: 12.0),
+                                      r['diagnosis'], size: 12.0),
                                   title: Text(
                                     r['name'] ?? 'Unnamed',
                                     style: const TextStyle(

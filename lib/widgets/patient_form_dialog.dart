@@ -48,7 +48,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
     return age;
   }
 
-  /// ✅ Live smart search
+  /// ✅ Live smart search with substring match
   Future<List<String>> _getSuggestions(String pattern) async {
     if (pattern.trim().isEmpty) return [];
     final results = await db.getPatientSuggestions(pattern.trim());
@@ -71,7 +71,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
       helpText: 'Select Birthday',
     );
 
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _selectedDate = picked;
         _birthdayController.text = DateFormat('yyyy-MM-dd').format(picked);
@@ -80,7 +80,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
     }
   }
 
-  void _submit() async {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
     final name = _nameController.text.trim();
@@ -90,11 +90,10 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
 
     final basePath = await storage.getSavedPath();
     if (basePath == null || basePath.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select a base folder first.')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a base folder first.')),
+      );
       return;
     }
 
@@ -114,16 +113,15 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
     await db.updatePatientFolderPath(patientId, patientFolder);
     await storage.setCurrentPatient(patientId);
 
-    if (mounted) {
-      Navigator.of(context).pop({
-        'patient_id': patientId,
-        'name': name,
-        'birthday': birthday,
-        'age': age,
-        'gender': gender,
-        'folder_path': patientFolder,
-      });
-    }
+    if (!mounted) return;
+    Navigator.of(context).pop({
+      'patient_id': patientId,
+      'name': name,
+      'birthday': birthday,
+      'age': age,
+      'gender': gender,
+      'folder_path': patientFolder,
+    });
   }
 
   @override
@@ -142,7 +140,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              /// ✅ LIVE smart TypeAheadField (v5.2.0 compatible)
+              /// ✅ TypeAheadField (v5.2.0 compatible, live & smart)
               TypeAheadField<String>(
                 debounceDuration: const Duration(milliseconds: 100),
                 suggestionsCallback: _getSuggestions,
@@ -177,7 +175,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
                           : null,
                     ),
                     onChanged: (value) {
-                      setState(() {}); // force rebuild for live suggestions
+                      setState(() {}); // live rebuild for suggestions
                     },
                     validator: (value) =>
                         value == null || value.isEmpty ? 'Enter a name' : null,
@@ -193,7 +191,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
                 onSelected: (String suggestion) async {
                   _nameController.text = suggestion;
                   final data = await _getPatientDetails(suggestion);
-                  if (data != null) {
+                  if (data != null && mounted) {
                     setState(() {
                       _isExistingPatient = true;
                       _birthdayController.text = data['birthday'] ?? '';
@@ -222,11 +220,22 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
                     leading: const Icon(Icons.add_circle_outline,
                         color: AppColors.primary),
                     title: Text('Add "$name" as new patient'),
-                    onTap: () {
+                    onTap: () async {
                       setState(() {
                         _isExistingPatient = false;
-                        FocusScope.of(context).unfocus();
+                        _nameController.text = name;
+                        _birthdayController.clear();
+                        _selectedGender = null;
+                        _selectedDate = null;
+                        _calculatedAge = null;
                       });
+
+                      if (!mounted) return;
+                      FocusScope.of(context).unfocus();
+
+                      Future.delayed(const Duration(milliseconds: 150));
+                      if (!mounted) return;
+                      FocusScope.of(context).requestFocus(FocusNode());
                     },
                   );
                 },
@@ -234,7 +243,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
 
               const SizedBox(height: 12),
 
-              /// Birthday + Age
+              /// 🎂 Birthday + Age
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -267,7 +276,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
 
               const SizedBox(height: 12),
 
-              /// Gender
+              /// ⚧️ Gender
               DropdownButtonFormField<String>(
                 initialValue: _selectedGender,
                 decoration: const InputDecoration(labelText: 'Gender'),
@@ -283,7 +292,6 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
           ),
         ),
       ),
-
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),

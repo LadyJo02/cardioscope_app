@@ -128,7 +128,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
         backgroundColor: AppColors.primary,
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.of(context).pop(true),
         ),
       ),
       body: SingleChildScrollView(
