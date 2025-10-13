@@ -1,24 +1,22 @@
+// 📄 lib/utils/pdf_exporter.dart
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:screenshot/screenshot.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../database_helper.dart';
+import '../services/tflite_service.dart';
 
 class PdfExporter {
-  static final _screenshotController = ScreenshotController();
-
-  // Global date formatter for consistency
-  static final _dateTimeFormat = DateFormat('MMMM d, yyyy – hh:mm a');
+  static final _dateTimeFormat = DateFormat('MMMM d, yyyy, hh:mm a');
   static final _dateOnlyFormat = DateFormat('MMMM d, yyyy');
 
   // --------------------------------------------------------------------------
@@ -30,23 +28,38 @@ class PdfExporter {
   }) async {
     final pdf = pw.Document();
     final logo = pw.MemoryImage(
-        (await rootBundle.load('assets/images/app_logo.png')).buffer.asUint8List());
+      (await rootBundle.load('assets/images/app_logo.png')).buffer.asUint8List(),
+    );
     final now = _dateTimeFormat.format(DateTime.now());
-    final waveformImage = await _generateWaveformImage(report['file_path']);
+
+    final melSpecImage = await _generateMelSpectrogramImage(report['file_path']);
+    final waveformSamples = await _loadWaveformSamples(report['file_path']);
 
     pdf.addPage(
-      pw.MultiPage(
+      pw.Page(
         pageFormat: PdfPageFormat.a4,
-        header: (context) => _buildHeader(practitionerName, now, logo),
-        footer: (context) => _buildFooter(context, practitionerName),
-        build: (context) => [
-          _buildReportContent(report, waveformImage),
-        ],
+        margin: const pw.EdgeInsets.all(32),
+        build: (context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            _buildHeader(practitionerName, now, logo),
+            pw.SizedBox(height: 12),
+            _buildReportContent(
+              report: report,
+              melImage: melSpecImage,
+              waveformSamples: waveformSamples,
+            ),
+            pw.Spacer(),
+            _buildFooter(context),
+          ],
+        ),
       ),
     );
 
     final dir = await getTemporaryDirectory();
-    final file = File("${dir.path}/CardioScope_Report_${DateTime.now().millisecondsSinceEpoch}.pdf");
+    final file = File(
+      "${dir.path}/CardioScope_Report_${DateTime.now().millisecondsSinceEpoch}.pdf",
+    );
     await file.writeAsBytes(await pdf.save());
     await Share.shareXFiles([XFile(file.path)], text: "CardioScope Report");
   }
@@ -61,19 +74,32 @@ class PdfExporter {
   }) async {
     final pdf = pw.Document();
     final logo = pw.MemoryImage(
-        (await rootBundle.load('assets/images/app_logo.png')).buffer.asUint8List());
+      (await rootBundle.load('assets/images/app_logo.png')).buffer.asUint8List(),
+    );
     final now = _dateTimeFormat.format(DateTime.now());
 
     for (final report in reports) {
-      final waveformImage = await _generateWaveformImage(report['file_path']);
+      final melSpecImage = await _generateMelSpectrogramImage(report['file_path']);
+      final waveformSamples = await _loadWaveformSamples(report['file_path']);
+
       pdf.addPage(
-        pw.MultiPage(
+        pw.Page(
           pageFormat: PdfPageFormat.a4,
-          header: (context) => _buildHeader(practitionerName, now, logo),
-          footer: (context) => _buildFooter(context, practitionerName),
-          build: (context) => [
-            _buildReportContent(report, waveformImage),
-          ],
+          margin: const pw.EdgeInsets.all(32),
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              _buildHeader(practitionerName, now, logo),
+              pw.SizedBox(height: 12),
+              _buildReportContent(
+                report: report,
+                melImage: melSpecImage,
+                waveformSamples: waveformSamples,
+              ),
+              pw.Spacer(),
+              _buildFooter(context),
+            ],
+          ),
         ),
       );
     }
@@ -92,7 +118,10 @@ class PdfExporter {
   // HEADER
   // --------------------------------------------------------------------------
   static pw.Widget _buildHeader(
-      String practitionerName, String now, pw.MemoryImage logo) {
+    String practitionerName,
+    String now,
+    pw.MemoryImage logo,
+  ) {
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -100,28 +129,34 @@ class PdfExporter {
         pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Text("CardioScope Report",
-                style: pw.TextStyle(
-                    fontSize: 22,
-                    fontWeight: pw.FontWeight.bold,
-                    color: const PdfColor.fromInt(0xFF2c3e50))),
-            pw.SizedBox(height: 8),
+            pw.Text(
+              "CardioScope Diagnostic Report",
+              style: pw.TextStyle(
+                fontSize: 20,
+                fontWeight: pw.FontWeight.bold,
+                color: const PdfColor.fromInt(0xFF2C3E50),
+              ),
+            ),
+            pw.SizedBox(height: 6),
             pw.Text("Generated by: $practitionerName",
                 style: const pw.TextStyle(color: PdfColors.grey700)),
             pw.Text("Date Generated: $now",
                 style: const pw.TextStyle(color: PdfColors.grey700)),
           ],
         ),
-        pw.SizedBox(height: 50, width: 50, child: pw.Image(logo)),
+        pw.SizedBox(height: 65, width: 65, child: pw.Image(logo)),
       ],
     );
   }
 
   // --------------------------------------------------------------------------
-  // REPORT CONTENT
+  // BODY CONTENT
   // --------------------------------------------------------------------------
-  static pw.Widget _buildReportContent(
-      Map<String, dynamic> report, pw.ImageProvider? waveformImage) {
+  static pw.Widget _buildReportContent({
+    required Map<String, dynamic> report,
+    required pw.ImageProvider? melImage,
+    required List<double>? waveformSamples,
+  }) {
     Map<String, dynamic> probs = {};
     if (report['probabilities'] is String &&
         (report['probabilities'] as String).isNotEmpty) {
@@ -139,61 +174,91 @@ class PdfExporter {
     String recordDateStr = 'N/A';
     if (report['record_date'] != null) {
       try {
-        recordDateStr = _dateTimeFormat.format(DateTime.parse(report['record_date']));
+        recordDateStr =
+            _dateTimeFormat.format(DateTime.parse(report['record_date']));
       } catch (_) {}
     }
 
     String birthdayStr = 'N/A';
     if (report['birthday'] != null && report['birthday'].toString().isNotEmpty) {
       try {
-        birthdayStr = _dateOnlyFormat.format(DateTime.parse(report['birthday']));
+        birthdayStr =
+            _dateOnlyFormat.format(DateTime.parse(report['birthday']));
       } catch (_) {
         birthdayStr = report['birthday'].toString();
       }
     }
 
+    const double contentWidth = 420;
+
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.SizedBox(height: 20),
+        pw.SizedBox(height: 10),
         _buildSectionHeader("Patient Details"),
         _buildDetailRow("Patient ID:", patientId),
         _buildDetailRow("Name:", report['name'] ?? 'N/A'),
         _buildDetailRow("Birthday:", birthdayStr),
         _buildDetailRow("Age:", report['age']?.toString() ?? 'N/A'),
         _buildDetailRow("Gender:", report['gender'] ?? 'N/A'),
-        pw.SizedBox(height: 20),
+        pw.SizedBox(height: 8),
         _buildSectionHeader("Recording Details"),
         _buildDetailRow("Record Date:", recordDateStr),
-        pw.SizedBox(height: 20),
-        _buildSectionHeader("Phonocardiogram (PCG)"),
-        pw.Container(
-          height: 100,
-          width: double.infinity,
-          margin: const pw.EdgeInsets.only(top: 8),
-          decoration: pw.BoxDecoration(
-            border: pw.Border.all(color: PdfColors.grey300, width: 0.5),
-            borderRadius: pw.BorderRadius.circular(4),
+        _buildDetailRow("File Path:", report['file_path'] ?? 'N/A'),
+        pw.SizedBox(height: 12),
+        _buildSectionHeader("Raw Waveform & Spectrogram"),
+        pw.Center(
+          child: pw.Column(
+            children: [
+              // --- Waveform ---
+              pw.Container(
+                width: contentWidth,
+                height: 120,
+                margin: const pw.EdgeInsets.only(top: 6, bottom: 8),
+                padding: const pw.EdgeInsets.all(6),
+                decoration: pw.BoxDecoration(
+                  color: const PdfColor.fromInt(0xFFF0F8F4), // pale hospital green
+                  borderRadius: pw.BorderRadius.circular(5),
+                  border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
+                ),
+                child: (waveformSamples != null && waveformSamples.isNotEmpty)
+                    ? _waveformCanvas(waveformSamples)
+                    : _waveformEmptyHint(),
+              ),
+              // --- Mel Spectrogram ---
+              pw.Container(
+                width: contentWidth,
+                height: 160,
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
+                  borderRadius: pw.BorderRadius.circular(5),
+                ),
+                child: melImage != null
+                    ? pw.Image(melImage, fit: pw.BoxFit.cover)
+                    : pw.Center(
+                        child: pw.Text("Spectrogram unavailable",
+                            style:
+                                const pw.TextStyle(color: PdfColors.grey)),
+                      ),
+              ),
+            ],
           ),
-          child: waveformImage != null
-              ? pw.Image(waveformImage, fit: pw.BoxFit.fill)
-              : pw.Center(
-                  child: pw.Text("Waveform data not available.",
-                      style: const pw.TextStyle(color: PdfColors.grey))),
         ),
-        pw.SizedBox(height: 20),
+        pw.SizedBox(height: 10),
         _buildSectionHeader("AI Analysis"),
         _buildDetailRow("Classification:", report['diagnosis'] ?? 'N/A'),
         if (probs.isNotEmpty) ...[
-          pw.SizedBox(height: 12),
-          pw.Text("Detailed Breakdown:",
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 5),
+          pw.SizedBox(height: 4),
+          pw.Text("Detailed Probabilities:",
+              style: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
+          pw.SizedBox(height: 2),
           pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: probs.entries.map((e) {
-              final percentage = ((e.value as num?)?.toDouble() ?? 0.0) * 100;
-              return pw.Text("  •  ${e.key}: ${percentage.toStringAsFixed(2)}%");
+              final pct = ((e.value as num?)?.toDouble() ?? 0.0) * 100;
+              return pw.Text("- ${e.key}: ${pct.toStringAsFixed(2)}%",
+                  style: const pw.TextStyle(color: PdfColors.black));
             }).toList(),
           ),
         ],
@@ -202,120 +267,150 @@ class PdfExporter {
   }
 
   // --------------------------------------------------------------------------
-  // SECTION / DETAIL HELPERS
+  // FOOTER
   // --------------------------------------------------------------------------
-  static pw.Widget _buildSectionHeader(String title) {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Text(title,
-            style: pw.TextStyle(
-                fontSize: 16,
-                fontWeight: pw.FontWeight.bold,
-                color: const PdfColor.fromInt(0xFF34495e))),
-        pw.Divider(height: 8, color: PdfColors.black, thickness: 0.5),
-        pw.SizedBox(height: 8),
-      ],
-    );
-  }
-
-  static pw.Widget _buildDetailRow(String label, String value) {
+  static pw.Widget _buildFooter(pw.Context context) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 3),
+      padding: const pw.EdgeInsets.only(top: 10),
       child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
-          pw.SizedBox(
-            width: 120,
-            child: pw.Text(label,
-                style: pw.TextStyle(
-                    fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
+          pw.Text(
+            "*This AI analysis is a preliminary screening tool and is not a substitute for a professional medical diagnosis.*",
+            style: pw.TextStyle(
+              fontSize: 8,
+              color: PdfColors.grey600,
+              fontStyle: pw.FontStyle.italic,
+            ),
           ),
-          pw.Expanded(child: pw.Text(value)),
+          pw.Text(
+            "Page ${context.pageNumber} of ${context.pagesCount}",
+            style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+          ),
         ],
       ),
     );
   }
 
   // --------------------------------------------------------------------------
-  // FOOTER (now includes practitioner line)
+  // WAVEFORM
   // --------------------------------------------------------------------------
-  static pw.Widget _buildFooter(pw.Context context, String practitionerName) {
-    return pw.Column(
-      mainAxisSize: pw.MainAxisSize.min,
-      children: [
-        pw.Divider(color: PdfColors.grey400, height: 20),
-        pw.Text(
-          "*This AI analysis is a preliminary screening tool and is not a substitute for a professional medical diagnosis.*",
-          style: pw.TextStyle(
-              fontSize: 8,
-              color: PdfColors.grey600,
-              fontStyle: pw.FontStyle.italic),
-        ),
-        pw.Text(
-          "Page ${context.pageNumber} of ${context.pagesCount}",
-          style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
-      ],
+  static pw.Widget _waveformCanvas(List<double> samples) {
+    return pw.CustomPaint(
+      painter: (canvas, size) {
+        final w = size.x;
+        final h = size.y;
+        final midY = h / 2;
+        if (samples.isEmpty) return;
+
+        final maxAmp = samples.map((e) => e.abs()).reduce(max);
+        final normalized =
+            maxAmp > 0 ? samples.map((v) => v / maxAmp).toList() : samples;
+        const int downsample = 50;
+        final reduced = [
+          for (int i = 0; i < normalized.length; i += downsample) normalized[i]
+        ];
+
+        if (reduced.length < 2) return;
+        final stepX = w / (reduced.length - 1);
+
+        canvas
+          ..setStrokeColor(const PdfColor.fromInt(0xFFB2DFDB))
+          ..setLineWidth(0.5)
+          ..moveTo(0, midY)
+          ..lineTo(w, midY)
+          ..strokePath();
+
+        canvas
+          ..setStrokeColor(const PdfColor.fromInt(0xFF00796B))
+          ..setLineWidth(1.0);
+        double x = 0;
+        double y = midY - (reduced[0] * midY);
+        canvas.moveTo(x, y);
+        for (int i = 1; i < reduced.length; i++) {
+          x = i * stepX;
+          y = midY - (reduced[i] * midY);
+          canvas.lineTo(x, y);
+        }
+        canvas.strokePath();
+      },
     );
   }
 
+  static pw.Widget _waveformEmptyHint() => pw.Center(
+        child: pw.Text("Waveform unavailable",
+            style: const pw.TextStyle(color: PdfColors.grey)),
+      );
+
   // --------------------------------------------------------------------------
-  // WAVEFORM GENERATION
+  // LOAD WAVEFORM
   // --------------------------------------------------------------------------
-  static Future<pw.ImageProvider?> _generateWaveformImage(String? path) async {
+  static Future<List<double>?> _loadWaveformSamples(String? path) async {
     if (path == null) return null;
-    final spots = await _loadWaveformData(path);
-    if (spots.isEmpty) return null;
-
-    final Uint8List imageBytes = await _screenshotController.captureFromWidget(
-      _buildWaveformChart(spots),
-      pixelRatio: 2.0,
-    );
-
-    return pw.MemoryImage(imageBytes);
-  }
-
-  static Widget _buildWaveformChart(List<FlSpot> spots) {
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.only(top: 10, bottom: 5, right: 10),
-      child: LineChart(
-        LineChartData(
-          titlesData: const FlTitlesData(show: false),
-          gridData: const FlGridData(show: false),
-          borderData: FlBorderData(show: false),
-          minY: -1,
-          maxY: 1,
-          lineBarsData: [
-            LineChartBarData(
-              spots: spots,
-              isCurved: false,
-              color: const Color(0xFF3498db),
-              barWidth: 1.2,
-              dotData: const FlDotData(show: false),
-            ),
-          ],
-          lineTouchData: const LineTouchData(enabled: false),
-        ),
-      ),
-    );
-  }
-
-  static Future<List<FlSpot>> _loadWaveformData(String path) async {
     final file = File(path);
-    if (!await file.exists()) return [];
+    if (!await file.exists()) return null;
     final bytes = await file.readAsBytes();
-    if (bytes.lengthInBytes <= 44) return [];
-
-    final pcmBytes = bytes.sublist(44);
-    final byteData = ByteData.view(pcmBytes.buffer);
-    final spots = <FlSpot>[];
-    const downsample = 50;
-    for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsample)) {
-      if (i + 2 <= pcmBytes.lengthInBytes) {
-        final sample = byteData.getInt16(i, Endian.little) / 32768.0;
-        spots.add(FlSpot((i / 2).toDouble(), sample));
-      }
+    if (bytes.length < 44) return null;
+    final pcm = bytes.sublist(44);
+    final byteData = ByteData.sublistView(pcm);
+    final samples = <double>[];
+    for (int i = 0; i < pcm.length; i += 2) {
+      samples.add(byteData.getInt16(i, Endian.little) / 32768.0);
     }
-    return spots;
+    return samples;
   }
+
+  // --------------------------------------------------------------------------
+  // MEL SPECTROGRAM (RGB safe + bright)
+  // --------------------------------------------------------------------------
+  static Future<pw.ImageProvider?> _generateMelSpectrogramImage(String? wavPath) async {
+    if (wavPath == null) return null;
+    try {
+      // 🧠 Use the same preprocessed PNG generated by TFLite
+      final melBytes = await TfliteService().generateMelImageBytes(
+        wavPath,
+        forPdf: true, // uses gamma=0.78 → identical to in-app display
+      );
+      if (melBytes == null) return null;
+
+      // ✅ Embed directly — no extra color correction needed
+      return pw.MemoryImage(
+        melBytes,// keep high DPI for crisp print
+      );
+    } catch (e) {
+      debugPrint("❌ Spectrogram load error: $e");
+      return null;
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // HELPERS
+  // --------------------------------------------------------------------------
+  static pw.Widget _buildSectionHeader(String title) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(title,
+              style: pw.TextStyle(
+                  fontSize: 14,
+                  fontWeight: pw.FontWeight.bold,
+                  color: const PdfColor.fromInt(0xFF34495E))),
+          pw.Divider(height: 8, color: PdfColors.black, thickness: 0.4),
+        ],
+      );
+
+  static pw.Widget _buildDetailRow(String label, String value) => pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 2),
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.SizedBox(
+              width: 120,
+              child: pw.Text(label,
+                  style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
+            ),
+            pw.Expanded(child: pw.Text(value)),
+          ],
+        ),
+      );
 }

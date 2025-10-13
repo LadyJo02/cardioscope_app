@@ -1,3 +1,4 @@
+// lib/database_helper.dart
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -202,22 +203,19 @@ class DatabaseHelper {
       debugPrint("🟡 Empty query → returning []");
       return [];
     }
-    
+
     final db = await database;
     final lowerQuery = query.toLowerCase();
 
-    // 🧠 Debugging output
     debugPrint("🔍 Searching for patients starting with: '$query'");
 
-    // Use %query% to match *anywhere* in the name (not just prefix)
     final result = await db.rawQuery('''
       SELECT name FROM patients
       WHERE LOWER(name) LIKE LOWER(?)
       ORDER BY name ASC
       LIMIT 10;
-    ''', ['%$lowerQuery%']); // match anywhere in the name
+    ''', ['%$lowerQuery%']);
 
-    // 🧠 Debug output for results
     debugPrint("📋 Found ${result.length} matching patients: "
         "${result.map((e) => e['name']).toList()}");
 
@@ -235,7 +233,6 @@ class DatabaseHelper {
     return result.isNotEmpty ? result.first : null;
   }
 
-/// Retrieve patient by ID (used for reloading current patient)
   Future<Map<String, dynamic>?> getPatientById(int patientId) async {
     final db = await database;
     final result = await db.query(
@@ -245,8 +242,7 @@ class DatabaseHelper {
       limit: 1,
     );
     return result.isNotEmpty ? result.first : null;
-  } 
-
+  }
 
   Future<int> updatePatientFolderPath(int patientId, String folderPath) async {
     final db = await database;
@@ -264,6 +260,13 @@ class DatabaseHelper {
   Future<int> insertAnalysis(Map<String, dynamic> analysis) async {
     final db = await database;
     return db.insert('mitral_valve_analysis', analysis);
+  }
+
+  /// Simple update for analysis by record_id (used for reanalysis)
+  Future<int> updateAnalysisByRecordId(int recordId, Map<String, dynamic> update) async {
+    final db = await database;
+    return db.update('mitral_valve_analysis', update,
+        where: 'record_id = ?', whereArgs: [recordId]);
   }
 
   /// Original method used by exports and reports filtering
@@ -296,7 +299,6 @@ class DatabaseHelper {
     ''', whereArgs);
   }
 
-  /// ✅ NEW: used by ReportsPage to load joined patient data easily
   Future<List<Map<String, dynamic>>> getAllReportsWithPatients(
       int practitionerId) async {
     final db = await database;

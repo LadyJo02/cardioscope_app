@@ -1,3 +1,4 @@
+// 📁 lib/pages/record.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -56,7 +57,8 @@ class _RecordPageState extends State<RecordPage> {
 
   Future<void> _init() async {
     await _dataStreamer.openRecorder();
-    await _tfliteService.loadModel();
+    // Load only preprocessor for visualization, classifier loads dynamically in runInference
+    await _tfliteService.loadModels(loadClassifier: false);
     await _loadCurrentPatient();
   }
 
@@ -81,7 +83,6 @@ class _RecordPageState extends State<RecordPage> {
     super.dispose();
   }
 
-  // 🔴 Start / Stop Recording
   Future<void> _toggleRecording() async {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
@@ -105,7 +106,6 @@ class _RecordPageState extends State<RecordPage> {
     if (mounted) setState(() => _isProcessing = false);
   }
 
-  // 🎙️ Start recording
   Future<void> _startRecording() async {
     _recordingDataController = StreamController<Uint8List>();
     _dataSubscription = _recordingDataController!.stream.listen(_updateWaveform);
@@ -147,13 +147,44 @@ class _RecordPageState extends State<RecordPage> {
     );
   }
 
-  // 🛑 Stop recording
   Future<void> _stopRecording() async {
     _recordingTimer?.cancel();
     if (!_dataStreamer.isRecording) return;
 
     await _dataStreamer.stopRecorder();
     final path = await _fileRecorder.stop();
+
+    // 🚫 Restrict short recordings (under 5 seconds)
+    if (_duration.inSeconds < _recordingDurationInSeconds) {
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Recording Too Short"),
+          content: const Text(
+            "Please record at least $_recordingDurationInSeconds seconds "
+            "to ensure accurate heart sound analysis.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text("OK"),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+
+      if (path != null) {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      }
+      setState(() {
+        _isProcessing = false;
+        _isRecording = false;
+      });
+      return; // ⛔ Stop early — don’t analyze or save
+    }
 
     _dataSubscription?.cancel();
     _recordingDataController?.close();
@@ -167,42 +198,42 @@ class _RecordPageState extends State<RecordPage> {
     });
 
     if (path != null) {
-      final result = await _tfliteService.runInference(filePath: path);
+      // Generate both outputs
+      final aiResult = await _tfliteService.runInference(filePath: path);
+      final melPng = await _tfliteService.generateMelImageBytes(path);
 
       if (!mounted) return;
       setState(() => _isProcessing = false);
-      await _handleRecordingSave(path, result);
+
+      await _handleRecordingSave(path, aiResult, melPng);
     } else {
       setState(() => _isProcessing = false);
     }
   }
 
-  // 🧩 Add or select patient dialog
   Future<Map<String, dynamic>?> _showPatientDialog({bool switchMode = false}) async {
+    if (!mounted) return null;
     return await showGeneralDialog<Map<String, dynamic>>(
       context: context,
-      barrierDismissible: !switchMode,
+      barrierDismissible: switchMode,
       barrierLabel: switchMode ? 'Switch Patient' : 'Patient Info',
       transitionDuration: const Duration(milliseconds: 250),
-      pageBuilder: (_, __, ___) =>
-          PatientFormDialog(isSwitchMode: switchMode),
+      pageBuilder: (_, __, ___) => PatientFormDialog(isSwitchMode: switchMode),
       transitionBuilder: (_, anim, __, child) => FadeTransition(
         opacity: anim,
         child: SlideTransition(
-          position: Tween(begin: const Offset(0, 0.1), end: Offset.zero)
-              .animate(anim),
+          position: Tween(begin: const Offset(0, 0.1), end: Offset.zero).animate(anim),
           child: child,
         ),
       ),
     );
   }
 
-  // 🧩 Switch Patient
   Future<void> _switchPatient() async {
     final result = await _showPatientDialog(switchMode: true);
     if (!mounted) return;
 
-    if (result != null && mounted) {
+    if (result != null) {
       setState(() => _currentPatient = result);
       await storage.setCurrentPatient(result['patient_id']);
       if (!mounted) return;
@@ -212,8 +243,11 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
-  // 💾 Save recording and analysis
-  Future<void> _handleRecordingSave(String tempPath, Map<String, dynamic>? aiResult) async {
+  Future<void> _handleRecordingSave(
+    String tempPath,
+    Map<String, dynamic>? aiResult,
+    Uint8List? melPng,
+  ) async {
     try {
       Map<String, dynamic>? patient = _currentPatient;
       if (patient == null) {
@@ -223,13 +257,13 @@ class _RecordPageState extends State<RecordPage> {
           if (await tempFile.exists()) await tempFile.delete();
           return;
         }
+        if (!mounted) return;
         setState(() => _currentPatient = patient);
       }
 
       final patientId = patient['patient_id'] ?? patient['id'];
       String? folderPath = patient['folder_path'];
 
-      // Ensure folder
       if (folderPath == null || folderPath.isEmpty) {
         final basePath = await storage.getSavedPath();
         if (basePath == null) throw Exception("No main CardioScope folder found.");
@@ -238,7 +272,7 @@ class _RecordPageState extends State<RecordPage> {
       }
 
       await storage.setCurrentPatient(patientId);
-      final patientName = patient['name'];
+      final patientName = patient['name'] ?? 'Unknown';
       final safeName = patientName.replaceAll(RegExp(r'[^a-zA-Z0-9_ ]'), "_");
 
       final date = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
@@ -268,8 +302,7 @@ class _RecordPageState extends State<RecordPage> {
       }
 
       if (!mounted) return;
-
-      final result = await Navigator.of(context).push(
+      await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ReportGeneratedPage(
             patientId: patientId,
@@ -279,25 +312,19 @@ class _RecordPageState extends State<RecordPage> {
             filePath: newPublicPath,
             recordedDate: recordDate,
             classification: aiResult?['label'] ?? 'Error',
-            probabilities:
-                aiResult?['probabilities'] as Map<String, dynamic>? ?? {},
+            probabilities: aiResult?['probabilities'] as Map<String, dynamic>? ?? {},
+            patientBirthday: patient?['birthday']?.toString(),
+            melPngBytes: melPng,
           ),
         ),
       );
-
-      // ✅ Refresh ReportsPage after returning
-      if (result == true && mounted) {
-        debugPrint("🟢 Triggering reports refresh after new record");
-      }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving record: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error saving record: $e')));
     }
   }
 
-  // ===== Waveform Logic =====
   void _updateWaveform(Uint8List rawData) {
     final byteData = rawData.buffer.asByteData();
     final samples = <double>[];
@@ -320,8 +347,7 @@ class _RecordPageState extends State<RecordPage> {
   void _startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() => _duration += const Duration(seconds: 1));
+      if (mounted) setState(() => _duration += const Duration(seconds: 1));
     });
   }
 
@@ -346,12 +372,14 @@ class _RecordPageState extends State<RecordPage> {
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
+        padding: const EdgeInsets.symmetric(vertical: 16.0),
         child: Column(
           children: [
             _buildPatientInfoCard(),
             const SizedBox(height: 8),
-            Expanded(child: _isRecording ? _buildRecordingView() : _buildGuidelinesView()),
+            Expanded(
+              child: _isRecording ? _buildRecordingView() : _buildGuidelinesView(),
+            ),
             Hero(
               tag: 'record_button_hero',
               child: GestureDetector(
@@ -388,13 +416,13 @@ class _RecordPageState extends State<RecordPage> {
             const SizedBox(height: 16),
             Text(instructionText,
                 style: const TextStyle(fontSize: 16, color: Colors.grey)),
+            const SizedBox(height: 8),
           ],
         ),
       ),
     );
   }
 
-  // 🧠 Patient Info Card
   Widget _buildPatientInfoCard() {
     final name = _currentPatient?['name'];
     final hasPatient = name != null && name.isNotEmpty;
@@ -406,13 +434,14 @@ class _RecordPageState extends State<RecordPage> {
       child: IgnorePointer(
         ignoring: isDisabled,
         child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12.0),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: Colors.black.withAlpha(8),
                 blurRadius: 8,
                 offset: const Offset(0, 3),
               )
@@ -440,9 +469,7 @@ class _RecordPageState extends State<RecordPage> {
                     color: isDisabled ? Colors.grey : AppColors.primary),
                 label: Text(
                   hasPatient ? "Switch" : "Add",
-                  style: TextStyle(
-                    color: isDisabled ? Colors.grey : AppColors.primary,
-                  ),
+                  style: TextStyle(color: isDisabled ? Colors.grey : AppColors.primary),
                 ),
               ),
             ],
@@ -469,8 +496,8 @@ class _RecordPageState extends State<RecordPage> {
           _buildGuidelineItem(Icons.mic_off_rounded, 'Ensure a quiet environment.'),
           _buildGuidelineItem(Icons.place_rounded,
               'Place stethoscope at the mitral area (as shown).'),
-          _buildGuidelineItem(
-              Icons.timer_rounded, 'The recording will last $_recordingDurationInSeconds seconds.'),
+          _buildGuidelineItem(Icons.timer_rounded,
+              'Recording will last $_recordingDurationInSeconds seconds.'),
           _buildGuidelineItem(
               Icons.person_rounded, 'Ensure the patient remains still during recording.'),
         ],
@@ -501,8 +528,7 @@ class _RecordPageState extends State<RecordPage> {
             child: _spots.isEmpty
                 ? const Center(
                     child: Text('Waiting for audio data...',
-                        style: TextStyle(color: Colors.grey)),
-                  )
+                        style: TextStyle(color: Colors.grey)))
                 : ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: LineChart(
@@ -541,9 +567,7 @@ class _RecordPageState extends State<RecordPage> {
         children: [
           Icon(icon, color: AppColors.primary, size: 24),
           const SizedBox(width: 16),
-          Expanded(
-            child: Text(text, style: const TextStyle(fontSize: 15, height: 1.4)),
-          ),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 15, height: 1.4))),
         ],
       ),
     );

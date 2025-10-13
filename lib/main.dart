@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'database_helper.dart'; // ✅ added import
+import 'database_helper.dart';
 import 'pages/dashboard.dart';
 import 'pages/login.dart';
 import 'pages/record.dart';
@@ -32,7 +32,8 @@ Future<void> main() async {
   themeNotifier.value = isDarkMode ? ThemeMode.dark : ThemeMode.light;
 
   final tflite = TfliteService();
-  await tflite.loadModel();
+  await tflite.loadModels(loadClassifier: true);
+
 
   // ✅ Verify DB structure once after model load
   await DatabaseHelper.instance.verifyDatabaseStructure();

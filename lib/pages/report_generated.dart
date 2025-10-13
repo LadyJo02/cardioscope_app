@@ -1,4 +1,4 @@
-// lib/pages/report_generated.dart
+// lib\pages\report_generated.dart
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -17,13 +17,14 @@ import '../utils/pdf_exporter.dart';
 class ReportGeneratedPage extends StatefulWidget {
   final int patientId;
   final String patientName;
-  final int patientAge;
+  final dynamic patientAge;
   final String patientGender;
   final String filePath;
   final DateTime recordedDate;
   final String classification;
   final Map<String, dynamic> probabilities;
-  final String? patientBirthday; // ✅ new field
+  final String? patientBirthday;
+  final Uint8List? melPngBytes;
 
   const ReportGeneratedPage({
     super.key,
@@ -35,7 +36,8 @@ class ReportGeneratedPage extends StatefulWidget {
     required this.recordedDate,
     required this.classification,
     required this.probabilities,
-    this.patientBirthday, // ✅ optional
+    this.patientBirthday,
+    this.melPngBytes,
   });
 
   @override
@@ -110,7 +112,6 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     final patientIdFormatted =
         DatabaseHelper.instance.formatPatientId(widget.patientId);
 
-    // ✅ Format birthday if available
     String birthdayDisplay = "-";
     if (widget.patientBirthday != null && widget.patientBirthday!.isNotEmpty) {
       try {
@@ -133,130 +134,121 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
-        child:
-            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Center(
-              child: Text('Analysis Complete!',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold, color: Colors.green[800]))),
-          const SizedBox(height: 16),
-          Card(
-            elevation: 2,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Patient Details',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.bold)),
-                    const Divider(height: 20),
-                    _buildDetailRow("Patient ID:", patientIdFormatted),
-                    _buildDetailRow("Name:", widget.patientName),
-                    _buildDetailRow("Birthday:", birthdayDisplay), // ✅ added
-                    _buildDetailRow("Age:", widget.patientAge.toString()),
-                    _buildDetailRow("Gender:", widget.patientGender),
-                    _buildDetailRow("File Location:", widget.filePath,
-                        isSelectable: true),
-                    _buildDetailRow(
-                        "Recorded:",
-                        DateFormat('MMMM d, yyyy HH:mm')
-                            .format(widget.recordedDate)),
-                  ]),
-            ),
+            child: Text('Analysis Complete!',
+                style: Theme.of(context)
+                    .textTheme
+                    .headlineSmall
+                    ?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green[800])),
           ),
           const SizedBox(height: 16),
-          Card(
-            elevation: 2,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Playback & Waveform',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.bold)),
-                    const Divider(height: 20),
-                    SizedBox(
-                      height: 150,
-                      child: FutureBuilder<List<FlSpot>>(
-                        future: _waveformFuture,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const Center(
-                                child: CircularProgressIndicator());
-                          }
-                          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                            return const Center(
-                                child: Text("Could not load waveform."));
-                          }
-                          return LineChart(LineChartData(
-                            titlesData: const FlTitlesData(show: false),
-                            gridData: const FlGridData(show: false),
-                            borderData: FlBorderData(show: false),
-                            lineBarsData: [
-                              LineChartBarData(
-                                  spots: snapshot.data!,
-                                  isCurved: false,
-                                  color: AppColors.primary,
-                                  barWidth: 1,
-                                  dotData: const FlDotData(show: false))
-                            ],
-                            minY: -1,
-                            maxY: 1,
-                            lineTouchData: const LineTouchData(enabled: false),
-                          ));
-                        },
-                      ),
+
+          // 1️⃣ 🩺 Patient Details
+          _buildCard(
+            title: 'Patient Details',
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _buildDetailRow("Patient ID:", patientIdFormatted),
+              _buildDetailRow("Name:", widget.patientName),
+              _buildDetailRow("Birthday:", birthdayDisplay),
+              _buildDetailRow("Age:", widget.patientAge.toString()),
+              _buildDetailRow("Gender:", widget.patientGender),
+              _buildDetailRow("File:", widget.filePath.split('/').last),
+              _buildDetailRow("Recorded:",
+                  DateFormat('MMMM d, yyyy HH:mm').format(widget.recordedDate)),
+            ]),
+          ),
+          const SizedBox(height: 16),
+
+          // 2️⃣ 🤖 AI Analysis
+          _buildCard(
+            title: 'AI Analysis',
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _buildDetailRow("Classification:", widget.classification),
+              const SizedBox(height: 10),
+              const Text("Detailed Breakdown:",
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.black54)),
+              const SizedBox(height: 8),
+              if (widget.probabilities.isEmpty)
+                const Text("No probabilities available",
+                    style: TextStyle(color: Colors.black54))
+              else
+                ...widget.probabilities.entries.map((entry) {
+                  return _buildProbabilityRow(
+                      entry.key, (entry.value as num).toDouble());
+                }),
+            ]),
+          ),
+          const SizedBox(height: 16),
+
+          // 3️⃣ 🎨 Model Input (Mel-Spectrogram)
+          _buildCard(
+            title: 'Model Input (Mel-Spectrogram)',
+            child: widget.melPngBytes != null
+                ? ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(
+                    widget.melPngBytes!,
+                    width: double.infinity,
+                    fit: BoxFit.cover, // 🔹 stretch width but keep proportions
+                  ),
+                )
+                : const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24.0),
+                      child: Text("Spectrogram not generated."),
                     ),
-                    const SizedBox(height: 12),
-                    _buildPlaybackControls(),
-                  ]),
-            ),
+                  ),
           ),
           const SizedBox(height: 16),
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('AI Analysis',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(fontWeight: FontWeight.bold)),
-                  const Divider(height: 20),
-                  _buildDetailRow("Classification:", widget.classification),
-                  const SizedBox(height: 10),
-                  const Text("Detailed Breakdown:",
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black54)),
-                  const SizedBox(height: 8),
-                  if (widget.probabilities.isEmpty)
-                    const Text("No probabilities available",
-                        style: TextStyle(color: Colors.black54))
-                  else
-                    ...widget.probabilities.entries.map((entry) {
-                      return _buildProbabilityRow(
-                          entry.key, entry.value as double);
-                    }),
-                ],
+
+          // 4️⃣ 🔊 Raw Waveform & Playback
+          _buildCard(
+            title: 'Raw Waveform & Playback',
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SizedBox(
+                height: 150,
+                child: FutureBuilder<List<FlSpot>>(
+                  future: _waveformFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState ==
+                        ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return const Center(
+                          child: Text("Could not load waveform."));
+                    }
+                    return LineChart(LineChartData(
+                      titlesData: const FlTitlesData(show: false),
+                      gridData: const FlGridData(show: false),
+                      borderData: FlBorderData(show: false),
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: snapshot.data!,
+                          isCurved: false,
+                          color: AppColors.primary,
+                          barWidth: 1.2,
+                          dotData: const FlDotData(show: false),
+                        ),
+                      ],
+                      minY: -1,
+                      maxY: 1,
+                      lineTouchData:
+                          const LineTouchData(enabled: false),
+                    ));
+                  },
+                ),
               ),
-            ),
+              const SizedBox(height: 12),
+              _buildPlaybackControls(),
+            ]),
           ),
           const SizedBox(height: 80),
         ]),
@@ -274,14 +266,35 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
               'record_date': widget.recordedDate.toIso8601String(),
               'diagnosis': widget.classification,
               'probabilities': widget.probabilities,
+              'mel_png': widget.melPngBytes,
             },
             practitionerName: _practitionerName,
           );
         },
         icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
-        label: const Text("Export PDF",
-            style: TextStyle(color: Colors.white)),
+        label:
+            const Text("Export PDF", style: TextStyle(color: Colors.white)),
         backgroundColor: AppColors.primary,
+      ),
+    );
+  }
+
+  Widget _buildCard({required String title, required Widget child}) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold)),
+          const Divider(height: 20),
+          child,
+        ]),
       ),
     );
   }
@@ -301,57 +314,52 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           icon = Icons.replay_rounded;
         }
 
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: Icon(icon, color: AppColors.primary),
-              iconSize: 48,
-              onPressed: () {
-                if (playing) {
-                  _player.pause();
-                } else if (processingState == ProcessingState.completed) {
-                  _player.seek(Duration.zero);
-                  _player.play();
-                } else {
-                  _player.play();
-                }
+        return Column(mainAxisSize: MainAxisSize.min, children: [
+          IconButton(
+            icon: Icon(icon, color: AppColors.primary),
+            iconSize: 48,
+            onPressed: () {
+              if (playing) {
+                _player.pause();
+              } else if (processingState == ProcessingState.completed) {
+                _player.seek(Duration.zero);
+                _player.play();
+              } else {
+                _player.play();
+              }
+            },
+          ),
+          Row(children: [
+            StreamBuilder<Duration>(
+              stream: _player.positionStream,
+              builder: (context, snapshot) {
+                final position = snapshot.data ?? Duration.zero;
+                return Text(_formatDuration(position));
               },
             ),
-            Row(
-              children: [
-                StreamBuilder<Duration>(
-                  stream: _player.positionStream,
-                  builder: (context, snapshot) {
-                    final position = snapshot.data ?? Duration.zero;
-                    return Text(_formatDuration(position));
-                  },
-                ),
-                Expanded(
-                  child: StreamBuilder<Duration?>(
-                    stream: _player.durationStream,
-                    builder: (context, snapshot) {
-                      final duration = snapshot.data ?? Duration.zero;
-                      return Slider(
-                        value: _player.position.inMilliseconds
-                            .toDouble()
-                            .clamp(0.0, duration.inMilliseconds.toDouble()),
-                        onChanged: (value) {
-                          _player.seek(Duration(milliseconds: value.toInt()));
-                        },
-                        min: 0.0,
-                        max: duration.inMilliseconds.toDouble(),
-                        activeColor: AppColors.primary,
-                        inactiveColor: Colors.grey.shade300,
-                      );
+            Expanded(
+              child: StreamBuilder<Duration?>(
+                stream: _player.durationStream,
+                builder: (context, snapshot) {
+                  final duration = snapshot.data ?? Duration.zero;
+                  return Slider(
+                    value: _player.position.inMilliseconds
+                        .toDouble()
+                        .clamp(0.0, duration.inMilliseconds.toDouble()),
+                    onChanged: (value) {
+                      _player.seek(Duration(milliseconds: value.toInt()));
                     },
-                  ),
-                ),
-                Text(_formatDuration(_player.duration ?? Duration.zero)),
-              ],
+                    min: 0.0,
+                    max: duration.inMilliseconds.toDouble(),
+                    activeColor: AppColors.primary,
+                    inactiveColor: Colors.grey.shade300,
+                  );
+                },
+              ),
             ),
-          ],
-        );
+            Text(_formatDuration(_player.duration ?? Duration.zero)),
+          ]),
+        ]);
       },
     );
   }
@@ -359,28 +367,24 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
   Widget _buildProbabilityRow(String label, double value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        children: [
-          Expanded(
-              flex: 2,
-              child:
-                  Text(label, style: TextStyle(color: Colors.grey.shade700))),
-          Expanded(
-            flex: 5,
-            child: LinearProgressIndicator(
-              value: value,
-              backgroundColor: Colors.grey.shade300,
-              color: UIHelpers.getStatusColor(label),
-              minHeight: 12,
-              borderRadius: BorderRadius.circular(6),
-            ),
+      child: Row(children: [
+        Expanded(flex: 2, child: Text(label, style: TextStyle(color: Colors.grey.shade700))),
+        Expanded(
+          flex: 5,
+          child: LinearProgressIndicator(
+            value: value,
+            backgroundColor: Colors.grey.shade300,
+            color: UIHelpers.getStatusColor(label),
+            minHeight: 12,
+            borderRadius: BorderRadius.circular(6),
           ),
-          Expanded(
-              flex: 2,
-              child: Text("${(value * 100).toStringAsFixed(2)}%",
-                  textAlign: TextAlign.end)),
-        ],
-      ),
+        ),
+        Expanded(
+          flex: 2,
+          child: Text("${(value * 100).toStringAsFixed(2)}%",
+              textAlign: TextAlign.end),
+        ),
+      ]),
     );
   }
 

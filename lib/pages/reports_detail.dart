@@ -1,4 +1,3 @@
-// lib/pages/reports_detail.dart
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -9,8 +8,11 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../database_helper.dart';
+import '../services/tflite_service.dart';
+import '../utils/pdf_exporter.dart';
 
 class ReportDetailPage extends StatefulWidget {
   final Map<String, dynamic> report;
@@ -23,17 +25,52 @@ class ReportDetailPage extends StatefulWidget {
 class _ReportDetailPageState extends State<ReportDetailPage> {
   final AudioPlayer _player = AudioPlayer();
   late final Future<List<FlSpot>> _waveformFuture;
+  final TfliteService _tfliteService = TfliteService();
+
+  bool _isReanalyzing = false;
+  Uint8List? _melPng;
+  late String _currentDiagnosis;
+  late Map<String, double> _currentProbabilities;
+  String _practitionerName = "Practitioner";
 
   @override
   void initState() {
     super.initState();
     _waveformFuture = _loadWaveformData();
+    _initializeState();
+    _loadPractitionerName();
+
     final path = widget.report['file_path'] as String?;
     if (path != null && File(path).existsSync()) {
-      _player.setFilePath(path).catchError((_) {
-        debugPrint("Could not load audio file for playback.");
+      _player.setFilePath(path).catchError((e) {
+        debugPrint("Could not load audio file: $e");
         return null;
       });
+    }
+  }
+
+  Future<void> _loadPractitionerName() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _practitionerName = prefs.getString('practitioner_name') ?? 'Practitioner';
+      });
+    }
+  }
+
+  void _initializeState() {
+    _currentDiagnosis = widget.report['diagnosis'] ?? 'N/A';
+    _currentProbabilities = {};
+    final probsJson = widget.report['probabilities'] as String?;
+    if (probsJson != null) {
+      try {
+        final decoded = jsonDecode(probsJson) as Map<String, dynamic>;
+        decoded.forEach((key, value) {
+          _currentProbabilities[key] = (value as num).toDouble();
+        });
+      } catch (e) {
+        debugPrint("Error decoding probabilities: $e");
+      }
     }
   }
 
@@ -50,10 +87,20 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     if (!await file.exists()) return [];
     final bytes = await file.readAsBytes();
     if (bytes.lengthInBytes <= 44) return [];
-    final pcmBytes = bytes.sublist(44);
+
+    int dataOffset = 44;
+    for (int i = 0; i < bytes.length - 4; i++) {
+      if (bytes[i] == 0x64 && bytes[i + 1] == 0x61 && bytes[i + 2] == 0x74 && bytes[i + 3] == 0x61) {
+        dataOffset = i + 8;
+        break;
+      }
+    }
+
+    final pcmBytes = bytes.sublist(dataOffset);
     final byteData = ByteData.view(pcmBytes.buffer);
     final spots = <FlSpot>[];
     const downsample = 40;
+
     for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsample)) {
       if (i + 2 <= pcmBytes.lengthInBytes) {
         final sample = byteData.getInt16(i, Endian.little) / 32768.0;
@@ -69,14 +116,117 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     return "$minutes:$seconds";
   }
 
+  Future<void> _generateMelIfNeeded() async {
+    if (_melPng != null) return;
+    final filePath = widget.report['file_path'] as String?;
+    if (filePath == null) return;
+
+    if (!mounted) return;
+    setState(() => _isReanalyzing = true);
+
+    final bytes = await _tfliteService.generateMelImageBytes(filePath);
+
+    if (!mounted) return;
+    setState(() {
+      _melPng = bytes;
+      _isReanalyzing = false;
+    });
+  }
+
+  Future<void> _reAnalyze() async {
+    final filePath = widget.report['file_path'] as String?;
+    final recordId = widget.report['record_id'] as int?;
+
+    if (filePath == null || recordId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("Missing file or record ID.")));
+      return;
+    }
+
+    setState(() => _isReanalyzing = true);
+    final result = await _tfliteService.runInference(filePath: filePath);
+    setState(() => _isReanalyzing = false);
+
+    if (result == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("Re-analysis failed.")));
+      return;
+    }
+
+    final db = DatabaseHelper.instance;
+    final diagnosis = result['label'] ?? 'N/A';
+    final probs = result['probabilities'] ?? {};
+    final probsJson = jsonEncode(probs);
+
+    await db.updateAnalysisByRecordId(recordId, {
+      'diagnosis': diagnosis,
+      'probabilities': probsJson,
+      'analysis_date': DateTime.now().toIso8601String(),
+    });
+
+    setState(() {
+      _currentDiagnosis = diagnosis;
+      _currentProbabilities = Map<String, double>.from(probs);
+    });
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text("Re-analysis complete.")));
+  }
+
+  Future<void> _handleExportPdf() async {
+    if (_melPng == null) {
+      // 🟡 Show prompt dialog
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text("Generate Spectrogram First"),
+          content: const Text(
+            "Please generate the Mel-Spectrogram before exporting the report to PDF.",
+          ),
+          actions: [
+            TextButton(
+              child: const Text("Cancel"),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            ElevatedButton(
+              child: const Text("Generate Now"),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _generateMelIfNeeded();
+              },
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    await PdfExporter.exportSingleReport(
+      report: {
+        'patient_id': widget.report['patient_id'],
+        'name': widget.report['name'],
+        'birthday': widget.report['birthday'],
+        'age': widget.report['age'],
+        'gender': widget.report['gender'],
+        'file_path': widget.report['file_path'],
+        'record_date': widget.report['record_date'],
+        'diagnosis': _currentDiagnosis,
+        'probabilities': _currentProbabilities,
+      },
+      practitionerName: _practitionerName,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final recordDate = widget.report['record_date'];
     String dateString = 'N/A';
     if (recordDate is String) {
       try {
-        dateString =
-            DateFormat('MMMM d, yyyy HH:mm').format(DateTime.parse(recordDate));
+        dateString = DateFormat('MMMM d, yyyy HH:mm').format(DateTime.parse(recordDate));
       } catch (_) {}
     }
 
@@ -84,16 +234,6 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     final patientIdFormatted = patientId != null
         ? DatabaseHelper.instance.formatPatientId(patientId as int)
         : 'N/A';
-
-    Map<String, double> probabilities = {};
-    final probabilitiesJson = widget.report['probabilities'] as String?;
-    if (probabilitiesJson != null) {
-      try {
-        probabilities = Map<String, double>.from(jsonDecode(probabilitiesJson));
-      } catch (e) {
-        debugPrint("Error decoding probabilities: $e");
-      }
-    }
 
     return Scaffold(
       appBar: AppBar(
@@ -103,138 +243,161 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           'Report for ${widget.report['name'] ?? 'Unnamed'}',
           style: const TextStyle(color: Colors.white),
         ),
+        actions: [
+          TextButton.icon(
+            onPressed: _isReanalyzing ? null : _reAnalyze,
+            icon: _isReanalyzing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.refresh, color: Colors.white),
+            label: const Text("Re-analyze", style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Card(
-            color: Colors.white,
-            elevation: 2,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Patient Details',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.bold)),
-                    const Divider(height: 20),
-                    _buildDetailRow('Patient ID:', patientIdFormatted),
-                    _buildDetailRow('Name:', widget.report['name'] ?? 'Unnamed'),
-                    _buildDetailRow(
-                      'Birthday:',
-                      (() {
-                        final bday = widget.report['birthday'];
-                        if (bday == null || bday.toString().isEmpty) return 'N/A';
-                        try {
-                          return DateFormat('MMMM d, yyyy').format(DateTime.parse(bday));
-                        } catch (_) {
-                          return bday.toString();
-                        } 
-                      })(),
-                    ),
-                    _buildDetailRow(
-                        'Age:', widget.report['age']?.toString() ?? 'N/A'),
-                    _buildDetailRow('Gender:', widget.report['gender'] ?? 'N/A'),
-                    _buildDetailRow('File:',
-                        (widget.report['file_path'] ?? '').split('/').last),
-                    _buildDetailRow('Recorded:', dateString),
-                  ]),
-            ),
-          ),
+          // 🩺 Patient Details
+          _buildCard(context,
+              title: 'Patient Details',
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _buildDetailRow('Patient ID:', patientIdFormatted),
+                _buildDetailRow('Name:', widget.report['name'] ?? 'Unnamed'),
+                _buildDetailRow(
+                    'Birthday:',
+                    (() {
+                      final bday = widget.report['birthday'];
+                      if (bday == null || bday.toString().isEmpty) return 'N/A';
+                      try {
+                        return DateFormat('MMMM d, yyyy').format(DateTime.parse(bday));
+                      } catch (_) {
+                        return bday.toString();
+                      }
+                    })()),
+                _buildDetailRow('Age:', widget.report['age']?.toString() ?? 'N/A'),
+                _buildDetailRow('Gender:', widget.report['gender'] ?? 'N/A'),
+                _buildDetailRow(
+                    'File:', (widget.report['file_path'] ?? '').split('/').last),
+                _buildDetailRow('Recorded:', dateString),
+              ])),
           const SizedBox(height: 16),
-          Card(
-            color: Colors.white,
-            elevation: 2,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Playback & Waveform',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.bold)),
-                    const Divider(height: 20),
-                    SizedBox(
-                      height: 140,
-                      child: FutureBuilder<List<FlSpot>>(
-                        future: _waveformFuture,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const Center(
-                                child: CircularProgressIndicator());
-                          }
-                          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                            return const Center(
-                                child: Text('No waveform available'));
-                          }
-                          return LineChart(LineChartData(
-                            titlesData: const FlTitlesData(show: false),
-                            gridData: const FlGridData(show: false),
-                            borderData: FlBorderData(show: false),
-                            minY: -1,
-                            maxY: 1,
-                            lineBarsData: [
-                              LineChartBarData(
-                                spots: snapshot.data!,
-                                isCurved: false,
-                                color: AppColors.primary,
-                                barWidth: 1.2,
-                                dotData: const FlDotData(show: false),
-                              ),
-                            ],
-                            lineTouchData: const LineTouchData(enabled: false),
-                          ));
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _buildPlaybackControls(),
-                  ]),
-            ),
-          ),
+
+          // 🤖 AI Analysis
+          _buildCard(context,
+              title: 'AI Analysis',
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _buildDetailRow('Classification:', _currentDiagnosis),
+                if (_currentProbabilities.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  const Text("Detailed Breakdown:",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, color: Colors.black54)),
+                  const SizedBox(height: 8),
+                  ..._currentProbabilities.entries.map((entry) {
+                    return _buildProbabilityRow(entry.key, entry.value);
+                  })
+                ] else ...[
+                  const SizedBox(height: 8),
+                  const Text("No probabilities available.")
+                ]
+              ])),
           const SizedBox(height: 16),
-          Card(
-            color: Colors.white,
-            elevation: 2,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('AI Analysis',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleLarge
-                            ?.copyWith(fontWeight: FontWeight.bold)),
-                    const Divider(height: 20),
-                    _buildDetailRow(
-                        'Classification:', widget.report['diagnosis'] ?? 'Pending'),
-                    if (probabilities.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      const Text("Detailed Breakdown:",
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black54)),
-                      const SizedBox(height: 8),
-                      ...probabilities.entries.map((entry) {
-                        return _buildProbabilityRow(entry.key, entry.value);
-                      })
-                    ]
-                  ]),
-            ),
-          ),
+
+          // 🎨 Model Input (Mel-Spectrogram)
+          _buildCard(context,
+              title: 'Model Input (Mel-Spectrogram)',
+              child: Column(children: [
+                if (_melPng != null)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.memory(
+                      _melPng!,
+                      width: double.infinity,
+                      fit: BoxFit.cover, // 🔹 fill horizontally to match waveform width
+                    ),
+                  )
+                else if (_isReanalyzing)
+                  const Center(child: CircularProgressIndicator())
+                else
+                  Column(children: [
+                    const Text('Spectrogram not yet generated.'),
+                    const SizedBox(height: 8),
+                    ElevatedButton(
+                        onPressed: _generateMelIfNeeded,
+                        child: const Text('Generate Spectrogram'))
+                  ])
+              ])),
+          const SizedBox(height: 16),
+
+          // 🔊 Raw Waveform & Playback
+          _buildCard(context,
+              title: 'Raw Waveform & Playback',
+              child: Column(children: [
+                SizedBox(
+                  height: 150,
+                  child: FutureBuilder<List<FlSpot>>(
+                    future: _waveformFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                        return const Center(child: Text('No waveform available'));
+                      }
+                      return LineChart(LineChartData(
+                        titlesData: const FlTitlesData(show: false),
+                        gridData: const FlGridData(show: false),
+                        borderData: FlBorderData(show: false),
+                        minY: -1,
+                        maxY: 1,
+                        lineBarsData: [
+                          LineChartBarData(
+                              spots: snapshot.data!,
+                              isCurved: false,
+                              color: AppColors.primary,
+                              barWidth: 1.2,
+                              dotData: const FlDotData(show: false)),
+                        ],
+                        lineTouchData: const LineTouchData(enabled: false),
+                      ));
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildPlaybackControls(),
+              ])),
+          const SizedBox(height: 80),
+        ]),
+      ),
+
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: AppColors.primary,
+        icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+        label: const Text("Export PDF", style: TextStyle(color: Colors.white)),
+        onPressed: _handleExportPdf,
+      ),
+    );
+  }
+
+  Widget _buildCard(BuildContext context,
+      {required String title, required Widget child}) {
+    return Card(
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold)),
+          const Divider(height: 20),
+          child,
         ]),
       ),
     );
@@ -255,57 +418,52 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           icon = Icons.replay_rounded;
         }
 
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: Icon(icon, color: AppColors.primary),
-              iconSize: 48,
-              onPressed: () {
-                if (playing) {
-                  _player.pause();
-                } else if (processingState == ProcessingState.completed) {
-                  _player.seek(Duration.zero);
-                  _player.play();
-                } else {
-                  _player.play();
-                }
+        return Column(mainAxisSize: MainAxisSize.min, children: [
+          IconButton(
+            icon: Icon(icon, color: AppColors.primary),
+            iconSize: 48,
+            onPressed: () {
+              if (playing) {
+                _player.pause();
+              } else if (processingState == ProcessingState.completed) {
+                _player.seek(Duration.zero);
+                _player.play();
+              } else {
+                _player.play();
+              }
+            },
+          ),
+          Row(children: [
+            StreamBuilder<Duration>(
+              stream: _player.positionStream,
+              builder: (context, snapshot) {
+                final position = snapshot.data ?? Duration.zero;
+                return Text(_formatDuration(position));
               },
             ),
-            Row(
-              children: [
-                StreamBuilder<Duration>(
-                  stream: _player.positionStream,
-                  builder: (context, snapshot) {
-                    final position = snapshot.data ?? Duration.zero;
-                    return Text(_formatDuration(position));
-                  },
-                ),
-                Expanded(
-                  child: StreamBuilder<Duration?>(
-                    stream: _player.durationStream,
-                    builder: (context, snapshot) {
-                      final duration = snapshot.data ?? Duration.zero;
-                      return Slider(
-                        value: _player.position.inMilliseconds
-                            .toDouble()
-                            .clamp(0.0, duration.inMilliseconds.toDouble()),
-                        onChanged: (value) {
-                          _player.seek(Duration(milliseconds: value.toInt()));
-                        },
-                        min: 0.0,
-                        max: duration.inMilliseconds.toDouble(),
-                        activeColor: AppColors.primary,
-                        inactiveColor: Colors.grey.shade300,
-                      );
+            Expanded(
+              child: StreamBuilder<Duration?>(
+                stream: _player.durationStream,
+                builder: (context, snapshot) {
+                  final duration = snapshot.data ?? Duration.zero;
+                  return Slider(
+                    value: _player.position.inMilliseconds
+                        .toDouble()
+                        .clamp(0.0, duration.inMilliseconds.toDouble()),
+                    onChanged: (value) {
+                      _player.seek(Duration(milliseconds: value.toInt()));
                     },
-                  ),
-                ),
-                Text(_formatDuration(_player.duration ?? Duration.zero)),
-              ],
+                    min: 0.0,
+                    max: duration.inMilliseconds.toDouble(),
+                    activeColor: AppColors.primary,
+                    inactiveColor: Colors.grey.shade300,
+                  );
+                },
+              ),
             ),
-          ],
-        );
+            Text(_formatDuration(_player.duration ?? Duration.zero)),
+          ]),
+        ]);
       },
     );
   }
@@ -313,34 +471,30 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   Widget _buildProbabilityRow(String label, double value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        children: [
-          Expanded(
-              flex: 2,
-              child:
-                  Text(label, style: TextStyle(color: Colors.grey.shade700))),
-          Expanded(
-            flex: 5,
-            child: LinearProgressIndicator(
-              value: value,
-              backgroundColor: Colors.grey.shade300,
-              color: UIHelpers.getStatusColor(label),
-              minHeight: 12,
-              borderRadius: BorderRadius.circular(6),
-            ),
+      child: Row(children: [
+        Expanded(flex: 2, child: Text(label, style: TextStyle(color: Colors.grey.shade700))),
+        Expanded(
+          flex: 5,
+          child: LinearProgressIndicator(
+            value: value,
+            backgroundColor: Colors.grey.shade300,
+            color: UIHelpers.getStatusColor(label),
+            minHeight: 12,
+            borderRadius: BorderRadius.circular(6),
           ),
-          Expanded(
-              flex: 2,
-              child: Text("${(value * 100).toStringAsFixed(2)}%",
-                  textAlign: TextAlign.end)),
-        ],
-      ),
+        ),
+        Expanded(
+          flex: 2,
+          child: Text("${(value * 100).toStringAsFixed(2)}%",
+              textAlign: TextAlign.end),
+        ),
+      ]),
     );
   }
 
   Widget _buildDetailRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(children: [
         Expanded(
             child: Text(label,

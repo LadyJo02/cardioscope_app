@@ -19,6 +19,7 @@ dependencies:
   path: ^1.9.0                       # File path utilities
   file_picker: ^8.1.0                # Pick files from device storage (PDF, audio, etc.)
   flutter_typeahead: ^5.2.0          # Autocomplete text fields for patient search/input
+  image: ^4.1.3                      # Image processing (e.g., resizing, cropping)    
 
   # UI & Charts
   cupertino_icons: ^1.0.8            # iOS-style icons
