@@ -251,7 +251,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.surface,
             ),
             child: const Text("Save"),
             onPressed: () async {
@@ -309,7 +309,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.surface,
             ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text("Delete"),
@@ -344,7 +344,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
+                foregroundColor: Theme.of(context).colorScheme.surface,
               ),
               child: const Text("Generate Now"),
               onPressed: () {
@@ -393,14 +393,14 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.surface),
         title: Text(
           'Report for ${_localReport['name'] ?? 'Unnamed'}',
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: Theme.of(context).colorScheme.surface),
         ),
         actions: [
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: Colors.white),
+            icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.surface),
             onSelected: (value) {
               if (value == 'reanalyze') _reAnalyze();
               if (value == 'edit') _showEditDialog();
@@ -454,9 +454,9 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppColors.primary,
-        icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+        icon: Icon(Icons.picture_as_pdf, color: Theme.of(context).colorScheme.surface),
         label:
-            const Text("Export PDF", style: TextStyle(color: Colors.white)),
+            Text("Export PDF", style: TextStyle(color: Theme.of(context).colorScheme.surface)),
         onPressed: _handleExportPdf,
       ),
     );
@@ -464,7 +464,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
   Widget _buildDetailSection(String patientIdFormatted, String dateString) {
     return Card(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -495,8 +495,8 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       child: Row(children: [
         Expanded(
             child: Text(label,
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, color: Colors.black54))),
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.7)))),
         Expanded(child: Text(value, textAlign: TextAlign.end)),
       ]),
     );
@@ -504,7 +504,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
   Widget _buildAnalysisSection() {
     return Card(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -536,12 +536,12 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
         Expanded(
             flex: 2,
             child: Text(label,
-                style: TextStyle(color: Colors.grey.shade700))),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)))),
         Expanded(
           flex: 5,
           child: LinearProgressIndicator(
             value: value,
-            backgroundColor: Colors.grey.shade300,
+            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
             color: UIHelpers.getStatusColor(label),
             minHeight: 12,
             borderRadius: BorderRadius.circular(6),
@@ -557,7 +557,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
   Widget _buildSpectrogramSection() {
     return Card(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -589,7 +589,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white),
+                    foregroundColor: Theme.of(context).colorScheme.surface),
                 onPressed: _generateMelIfNeeded,
                 child: const Text('Generate Spectrogram'),
               ),
@@ -601,7 +601,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
   Widget _buildWaveformSection() {
     return Card(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
