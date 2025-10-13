@@ -24,16 +24,13 @@ Future<void> main() async {
   ].request();
 
   final prefs = await SharedPreferences.getInstance();
-
   final hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
   final int? practitionerId = prefs.getInt("practitioner_id");
-
   final isDarkMode = prefs.getBool('isDarkMode') ?? false;
   themeNotifier.value = isDarkMode ? ThemeMode.dark : ThemeMode.light;
 
   final tflite = TfliteService();
   await tflite.loadModels(loadClassifier: true);
-
 
   // ✅ Verify DB structure once after model load
   await DatabaseHelper.instance.verifyDatabaseStructure();
@@ -71,6 +68,8 @@ class CardioScopeApp extends StatelessWidget {
           title: 'CardioScope',
           debugShowCheckedModeBanner: false,
           themeMode: mode,
+
+          // 🌞 LIGHT THEME
           theme: ThemeData(
             brightness: Brightness.light,
             scaffoldBackgroundColor: AppColors.scaffoldBackground,
@@ -80,16 +79,24 @@ class CardioScopeApp extends StatelessWidget {
               brightness: Brightness.light,
               secondary: AppColors.accent,
             ),
-            appBarTheme: AppBarTheme(
+            appBarTheme: const AppBarTheme(
               backgroundColor: AppColors.primary,
-              foregroundColor: Theme.of(context).colorScheme.onSurface,
+              foregroundColor: Colors.white,
+              iconTheme: IconThemeData(color: Colors.white),
             ),
-            floatingActionButtonTheme: FloatingActionButtonThemeData(
+            floatingActionButtonTheme: const FloatingActionButtonThemeData(
               backgroundColor: AppColors.primary,
-              foregroundColor: Theme.of(context).colorScheme.onSurface,
+              foregroundColor: Colors.white,
+            ),
+            bottomAppBarTheme: const BottomAppBarThemeData(
+              color: Colors.white, // ✅ Fixed light theme background
+              elevation: 10,
+              surfaceTintColor: Colors.transparent,
             ),
             useMaterial3: true,
           ),
+
+          // 🌚 DARK THEME
           darkTheme: ThemeData(
             brightness: Brightness.dark,
             primaryColor: AppColors.primary,
@@ -98,16 +105,24 @@ class CardioScopeApp extends StatelessWidget {
               brightness: Brightness.dark,
               secondary: AppColors.accent,
             ),
-            appBarTheme: AppBarTheme(
+            scaffoldBackgroundColor: const Color(0xFF121212),
+            appBarTheme: const AppBarTheme(
               backgroundColor: AppColors.primary,
-              foregroundColor: Theme.of(context).colorScheme.onSurface,
+              foregroundColor: Colors.white,
+              iconTheme: IconThemeData(color: Colors.white),
             ),
-            floatingActionButtonTheme: FloatingActionButtonThemeData(
+            floatingActionButtonTheme: const FloatingActionButtonThemeData(
               backgroundColor: AppColors.primary,
-              foregroundColor: Theme.of(context).colorScheme.onSurface,
+              foregroundColor: Colors.white,
+            ),
+            bottomAppBarTheme: const BottomAppBarThemeData(
+              color: Color(0xFF1E1E1E), // ✅ Fixed dark theme background
+              elevation: 10,
+              surfaceTintColor: Colors.transparent,
             ),
             useMaterial3: true,
           ),
+
           home: _getInitialPage(),
           routes: {
             '/record': (context) => const RecordPage(),
@@ -187,8 +202,9 @@ class _MainNavigationState extends State<MainNavigation> {
             ElevatedButton(
               onPressed: () => Navigator.of(ctx).pop(true),
               style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Theme.of(context).colorScheme.onSurface),
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Select Folder'),
             ),
           ],
@@ -196,7 +212,6 @@ class _MainNavigationState extends State<MainNavigation> {
       );
 
       if (proceed != true) {
-        debugPrint('❌ User canceled folder selection dialog.');
         if (!mounted) return;
         await showDialog(
           context: context,
@@ -241,7 +256,6 @@ class _MainNavigationState extends State<MainNavigation> {
         return;
       }
 
-      debugPrint('✅ Folder path saved: $pickedPath');
       scaffoldMessenger.showSnackBar(
         SnackBar(
           content: Text('Save location set: $pickedPath'),
@@ -250,7 +264,6 @@ class _MainNavigationState extends State<MainNavigation> {
       );
       _navigateToRecordPage();
     } else {
-      debugPrint('✅ Existing folder path detected: $savedPath');
       _navigateToRecordPage();
     }
   }
@@ -315,21 +328,23 @@ class _MainNavigationState extends State<MainNavigation> {
         child: FloatingActionButton.large(
           onPressed: _handleMicPressed,
           backgroundColor: AppColors.primary,
-          foregroundColor: Theme.of(context).colorScheme.onSurface,
+          foregroundColor: Colors.white,
           elevation: 8.0,
           shape: const CircleBorder(),
           child: const Icon(Icons.mic, size: 40),
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+
+      // ✅ BottomAppBar now fully theme-driven
       bottomNavigationBar: BottomAppBar(
-        color: Theme.of(context).bottomAppBarTheme.color ?? Theme.of(context).colorScheme.onSurface,
-        surfaceTintColor:
-            Theme.of(context).bottomAppBarTheme.surfaceTintColor ?? Theme.of(context).colorScheme.onSurface,
         shape: const CircularNotchedRectangle(),
         notchMargin: 10.0,
         height: 70,
-        elevation: 10,
+        elevation: Theme.of(context).bottomAppBarTheme.elevation ?? 10,
+        color: Theme.of(context).bottomAppBarTheme.color,
+        surfaceTintColor:
+            Theme.of(context).bottomAppBarTheme.surfaceTintColor,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: <Widget>[
