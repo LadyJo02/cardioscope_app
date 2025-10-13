@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:cardioscope_app/pages/report_generated.dart';
 import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/services/tflite_service.dart';
@@ -27,10 +28,9 @@ class RecordPage extends StatefulWidget {
 }
 
 class _RecordPageState extends State<RecordPage> {
-  // === Recording config ===
   static const int _recordingDurationInSeconds = 5;
-  static const int _visiblePoints = 1000; // ~ rolling window width (affects scroll speed)
-  static const double _smoothAlpha = 0.15; // EMA smoothing strength for samples
+  static const int _visiblePoints = 1000;
+  static const double _smoothAlpha = 0.15;
 
   final FlutterSoundRecorder _dataStreamer = FlutterSoundRecorder();
   final file_recorder.AudioRecorder _fileRecorder = file_recorder.AudioRecorder();
@@ -44,10 +44,14 @@ class _RecordPageState extends State<RecordPage> {
   bool _isRecording = false;
   bool _isProcessing = false;
 
-  // Rolling chart data
+  // Receiver connection status
+  StreamSubscription<Set<AudioDevice>>? _devicesSubscription;
+  bool _isUsbMicConnected = false;
+
+  // Waveform state
   List<FlSpot> _spots = [];
-  double _timeCounter = 0; // we treat this like an index; not seconds
-  double _displayGain = 1.0; // soft auto-gain with decay for stable visual amplitude
+  double _timeCounter = 0;
+  double _displayGain = 1.0;
 
   Timer? _timer;
   Timer? _recordingTimer;
@@ -63,9 +67,9 @@ class _RecordPageState extends State<RecordPage> {
 
   Future<void> _init() async {
     await _dataStreamer.openRecorder();
-    // Load only preprocessor for visualization; classifier loads dynamically in runInference
     await _tfliteService.loadModels(loadClassifier: false);
     await _loadCurrentPatient();
+    await _initAudioSession();
   }
 
   Future<void> _loadCurrentPatient() async {
@@ -78,20 +82,74 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
+  Future<void> _initAudioSession() async {
+    final session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration.speech());
+    _devicesSubscription = session.devicesStream.listen((devices) {
+      _checkConnectedDevices(devices.toList());
+    });
+    _checkConnectedDevices((await session.getDevices()).toList());
+  }
+
+  void _checkConnectedDevices(List<AudioDevice> devices) {
+    final usbDevice = devices.firstWhere(
+      (d) => d.name.toLowerCase().contains('usb'),
+      orElse: () => AudioDevice(
+        id: '',
+        name: '',
+        type: AudioDeviceType.unknown,
+        isInput: false,
+        isOutput: false,
+      ),
+    );
+
+    if (mounted) {
+      final wasConnected = _isUsbMicConnected;
+      setState(() {
+        _isUsbMicConnected = usbDevice.id.isNotEmpty;
+      });
+
+      // 🔔 show small toast if status changes
+      if (_isUsbMicConnected != wasConnected) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _isUsbMicConnected
+                  ? 'CardioScope receiver connected'
+                  : 'CardioScope receiver disconnected',
+            ),
+            backgroundColor: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
     _recordingTimer?.cancel();
     _dataSubscription?.cancel();
+    _devicesSubscription?.cancel();
     _recordingDataController?.close();
     _dataStreamer.closeRecorder();
     _fileRecorder.dispose();
     super.dispose();
   }
 
+  // === Main recording logic ===
   Future<void> _toggleRecording() async {
     if (_isProcessing) return;
     setState(() => _isProcessing = true);
+
+    if (!_isUsbMicConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please connect the CardioScope receiver first.')),
+      );
+      setState(() => _isProcessing = false);
+      return;
+    }
 
     final hasPermission = await _fileRecorder.hasPermission();
     if (!hasPermission) {
@@ -144,6 +202,7 @@ class _RecordPageState extends State<RecordPage> {
     _startAutoStopTimer();
   }
 
+  // 🕒 Automatically stops recording after the defined duration
   void _startAutoStopTimer() {
     _recordingTimer?.cancel();
     _recordingTimer = Timer(
@@ -154,6 +213,7 @@ class _RecordPageState extends State<RecordPage> {
     );
   }
 
+
   Future<void> _stopRecording() async {
     _recordingTimer?.cancel();
     if (!_dataStreamer.isRecording) return;
@@ -161,37 +221,7 @@ class _RecordPageState extends State<RecordPage> {
     await _dataStreamer.stopRecorder();
     final path = await _fileRecorder.stop();
 
-    // 🚫 Restrict short recordings (under 5 seconds)
-    if (_duration.inSeconds < _recordingDurationInSeconds) {
-      if (!mounted) return;
-      await showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text("Recording Too Short"),
-          content: const Text(
-            "Please record at least $_recordingDurationInSeconds seconds "
-            "to ensure accurate heart sound analysis.",
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text("OK"),
-            ),
-          ],
-        ),
-      );
-      if (!mounted) return;
-
-      if (path != null) {
-        final file = File(path);
-        if (await file.exists()) await file.delete();
-      }
-      setState(() {
-        _isProcessing = false;
-        _isRecording = false;
-      });
-      return;
-    }
+    if (path == null) return;
 
     _dataSubscription?.cancel();
     _recordingDataController?.close();
@@ -204,67 +234,22 @@ class _RecordPageState extends State<RecordPage> {
       _isProcessing = true;
     });
 
-    if (path != null) {
-      // Generate both outputs
-      final aiResult = await _tfliteService.runInference(filePath: path);
-      final melPng = await _tfliteService.generateMelImageBytes(path);
+    final aiResult = await _tfliteService.runInference(filePath: path);
+    final melPng = await _tfliteService.generateMelImageBytes(path);
 
-      if (!mounted) return;
-      setState(() => _isProcessing = false);
-
-      await _handleRecordingSave(path, aiResult, melPng);
-    } else {
-      setState(() => _isProcessing = false);
-    }
-  }
-
-  Future<Map<String, dynamic>?> _showPatientDialog({bool switchMode = false}) async {
-    if (!mounted) return null;
-    return await showGeneralDialog<Map<String, dynamic>>(
-      context: context,
-      barrierDismissible: switchMode,
-      barrierLabel: switchMode ? 'Switch Patient' : 'Patient Info',
-      transitionDuration: const Duration(milliseconds: 250),
-      pageBuilder: (_, __, ___) => PatientFormDialog(isSwitchMode: switchMode),
-      transitionBuilder: (_, anim, __, child) => FadeTransition(
-        opacity: anim,
-        child: SlideTransition(
-          position: Tween(begin: const Offset(0, 0.1), end: Offset.zero).animate(anim),
-          child: child,
-        ),
-      ),
-    );
-  }
-
-  Future<void> _switchPatient() async {
-    final result = await _showPatientDialog(switchMode: true);
     if (!mounted) return;
+    setState(() => _isProcessing = false);
 
-    if (result != null) {
-      setState(() => _currentPatient = result);
-      await storage.setCurrentPatient(result['patient_id']);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Switched to patient: ${result['name']}')),
-      );
-    }
+    await _handleRecordingSave(path, aiResult, melPng);
   }
 
   Future<void> _handleRecordingSave(
-    String tempPath,
-    Map<String, dynamic>? aiResult,
-    Uint8List? melPng,
-  ) async {
+      String tempPath, Map<String, dynamic>? aiResult, Uint8List? melPng) async {
     try {
       Map<String, dynamic>? patient = _currentPatient;
       if (patient == null) {
         patient = await _showPatientDialog();
-        if (patient == null) {
-          final tempFile = File(tempPath);
-          if (await tempFile.exists()) await tempFile.delete();
-          return;
-        }
-        if (!mounted) return;
+        if (patient == null) return;
         setState(() => _currentPatient = patient);
       }
 
@@ -273,8 +258,7 @@ class _RecordPageState extends State<RecordPage> {
 
       if (folderPath == null || folderPath.isEmpty) {
         final basePath = await storage.getSavedPath();
-        if (basePath == null) throw Exception("No main CardioScope folder found.");
-        folderPath = await storage.createPatientFolder(basePath, patient['name']);
+        folderPath = await storage.createPatientFolder(basePath!, patient['name']);
         await db.updatePatientFolderPath(patientId, folderPath);
       }
 
@@ -301,9 +285,8 @@ class _RecordPageState extends State<RecordPage> {
         await db.insertAnalysis({
           "record_id": recordId,
           "diagnosis": aiResult['label'] ?? "Error",
-          "probabilities": aiResult['probabilities'] != null
-              ? jsonEncode(aiResult['probabilities'])
-              : "{}",
+          "probabilities":
+              aiResult['probabilities'] != null ? jsonEncode(aiResult['probabilities']) : "{}",
           "analysis_date": DateTime.now().toIso8601String(),
         });
       }
@@ -332,23 +315,50 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
-  // === Real-time rolling PCG waveform ===
+  Future<Map<String, dynamic>?> _showPatientDialog({bool switchMode = false}) async {
+    return await showGeneralDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: switchMode,
+      barrierLabel: switchMode ? 'Switch Patient' : 'Patient Info',
+      transitionDuration: const Duration(milliseconds: 250),
+      pageBuilder: (_, __, ___) => PatientFormDialog(isSwitchMode: switchMode),
+      transitionBuilder: (_, anim, __, child) => FadeTransition(
+        opacity: anim,
+        child: SlideTransition(
+          position: Tween(begin: const Offset(0, 0.1), end: Offset.zero).animate(anim),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _switchPatient() async {
+    final result = await _showPatientDialog(switchMode: true);
+    if (result != null) {
+      if (!mounted) return;
+      setState(() => _currentPatient = result);
+      await storage.setCurrentPatient(result['patient_id']);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Switched to patient: ${result['name']}')));
+    }
+  }
+
+  // === waveform visualisation ===
   void _updateWaveform(Uint8List rawData) {
     if (!mounted) return;
-
-    // PCM16 -> double [-1, 1]
     final bd = rawData.buffer.asByteData();
     final tmp = <double>[];
     for (int i = 0; i < rawData.lengthInBytes; i += 2) {
       tmp.add(bd.getInt16(i, Endian.little) / 32768.0);
     }
 
-    // Downsample with simple average + EMA smoothing to reduce jitter
-    const int step = 100; // larger = slower scroll (~25ms per point at 4kHz)
-    const double timeStep = 0.007; // seconds per plotted point (7 ms visual rate)
-    
+    const int step = 100;
+    const double timeStep = 0.007;
     final reduced = <double>[];
     double prev = 0.0;
+
     for (int i = 0; i < tmp.length; i += step) {
       double avg = 0;
       int count = 0;
@@ -357,19 +367,15 @@ class _RecordPageState extends State<RecordPage> {
         count++;
       }
       avg /= (count == 0 ? 1 : count);
-
-      // Exponential smoothing (softens sharp transitions)
       final smoothed = prev + _smoothAlpha * (avg - prev);
       prev = smoothed;
       reduced.add(smoothed);
     }
 
-    // Soft auto-gain with slow response (prevents jumpy scaling)
     final peak = reduced.fold(1e-6, (double m, e) => math.max(m, e.abs()));
-    double targetGain = 1 / (peak * 1.2); // leave headroom
-    targetGain = targetGain.clamp(0.8, 6.0); // keep within sensible bounds
-    _displayGain = 0.90 * _displayGain + 0.10 * targetGain;
-    
+    double targetGain = 1 / (peak * 1.2);
+    targetGain = targetGain.clamp(0.8, 6.0);
+    _displayGain = 0.9 * _displayGain + 0.1 * targetGain;
 
     setState(() {
       for (final s in reduced) {
@@ -377,8 +383,6 @@ class _RecordPageState extends State<RecordPage> {
         final value = (s * _displayGain).clamp(-1.0, 1.0);
         _spots.add(FlSpot(_timeCounter, value));
       }
-
-       // Keep last few seconds visible (like hospital monitor)
       const int maxVisible = 1000;
       if (_spots.length > _visiblePoints) {
         _spots = _spots.sublist(_spots.length - maxVisible);
@@ -401,11 +405,11 @@ class _RecordPageState extends State<RecordPage> {
     return "$mm:$ss";
   }
 
+  // === UI ===
   @override
   Widget build(BuildContext context) {
-    final instructionText = _isRecording
-        ? "Recording... (stops in $_recordingDurationInSeconds s)"
-        : "Tap to Start";
+    final instructionText =
+        _isRecording ? "Recording... (stops in $_recordingDurationInSeconds s)" : "Tap to Start";
 
     return Scaffold(
       appBar: AppBar(
@@ -417,6 +421,8 @@ class _RecordPageState extends State<RecordPage> {
         padding: const EdgeInsets.symmetric(vertical: 16.0),
         child: Column(
           children: [
+            _buildReceiverStatusBanner(),
+            const SizedBox(height: 6),
             _buildPatientInfoCard(),
             const SizedBox(height: 8),
             Expanded(
@@ -426,38 +432,40 @@ class _RecordPageState extends State<RecordPage> {
               tag: 'record_button_hero',
               child: GestureDetector(
                 onTap: _toggleRecording,
-                child: Container(
-                  width: ButtonConstants.micButtonSize,
-                  height: ButtonConstants.micButtonSize,
-                  decoration: BoxDecoration(
-                    color: _isRecording ? Colors.white : AppColors.primary,
-                    shape: BoxShape.circle,
-                    border: _isRecording
-                        ? Border.all(color: AppColors.primary, width: 4)
-                        : null,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withAlpha(40),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      )
-                    ],
-                  ),
-                  child: Center(
-                    child: _isProcessing
-                        ? const CircularProgressIndicator(color: AppColors.primary)
-                        : Icon(
-                            _isRecording ? Icons.stop_rounded : Icons.mic,
-                            color: _isRecording ? AppColors.primary : Colors.white,
-                            size: 50,
-                          ),
+                child: Opacity(
+                  opacity: _isUsbMicConnected ? 1 : 0.6,
+                  child: Container(
+                    width: ButtonConstants.micButtonSize,
+                    height: ButtonConstants.micButtonSize,
+                    decoration: BoxDecoration(
+                      color: _isRecording ? Colors.white : AppColors.primary,
+                      shape: BoxShape.circle,
+                      border: _isRecording
+                          ? Border.all(color: AppColors.primary, width: 4)
+                          : null,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.15),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        )
+                      ],
+                    ),
+                    child: Center(
+                      child: _isProcessing
+                          ? const CircularProgressIndicator(color: AppColors.primary)
+                          : Icon(
+                              _isRecording ? Icons.stop_rounded : Icons.mic,
+                              color: _isRecording ? AppColors.primary : Colors.white,
+                              size: 50,
+                            ),
+                    ),
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
-            Text(instructionText,
-                style: const TextStyle(fontSize: 16, color: Colors.grey)),
+            Text(instructionText, style: const TextStyle(fontSize: 16, color: Colors.grey)),
             const SizedBox(height: 8),
           ],
         ),
@@ -465,6 +473,44 @@ class _RecordPageState extends State<RecordPage> {
     );
   }
 
+  // === Small receiver banner ===
+  Widget _buildReceiverStatusBanner() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+      decoration: BoxDecoration(
+        color: _isUsbMicConnected
+            ? Colors.green.withValues(alpha: 0.15)
+            : Colors.redAccent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+          width: 0.8,
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            _isUsbMicConnected ? Icons.usb_rounded : Icons.usb_off_rounded,
+            color: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _isUsbMicConnected ? "Receiver Connected" : "Receiver Disconnected",
+            style: TextStyle(
+              color: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // === Reuse of old UI cards (patient + waveform) ===
   Widget _buildPatientInfoCard() {
     final name = _currentPatient?['name'];
     final hasPatient = name != null && name.isNotEmpty;
@@ -483,7 +529,7 @@ class _RecordPageState extends State<RecordPage> {
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withAlpha(8),
+                color: Colors.black.withValues(alpha: 0.08),
                 blurRadius: 8,
                 offset: const Offset(0, 3),
               )
@@ -538,10 +584,10 @@ class _RecordPageState extends State<RecordPage> {
           _buildGuidelineItem(Icons.mic_off_rounded, 'Ensure a quiet environment.'),
           _buildGuidelineItem(Icons.place_rounded,
               'Place stethoscope at the mitral area (as shown).'),
-          _buildGuidelineItem(Icons.timer_rounded,
-              'Recording will last $_recordingDurationInSeconds seconds.'),
           _buildGuidelineItem(
-              Icons.person_rounded, 'Ensure the patient remains still during recording.'),
+              Icons.timer_rounded, 'Recording will last $_recordingDurationInSeconds seconds.'),
+          _buildGuidelineItem(Icons.person_rounded,
+              'Ensure the patient remains still during recording.'),
         ],
       ),
     );
@@ -564,7 +610,7 @@ class _RecordPageState extends State<RecordPage> {
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withAlpha(20),
+                  color: Colors.black.withValues(alpha: 0.2),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 )
@@ -572,14 +618,13 @@ class _RecordPageState extends State<RecordPage> {
             ),
             child: _spots.isEmpty
                 ? const Center(
-                    child: Text('Waiting for audio data...',
-                        style: TextStyle(color: Colors.grey)))
+                    child:
+                        Text('Waiting for audio data...', style: TextStyle(color: Colors.grey)))
                 : ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: LineChart(
                       LineChartData(
                         titlesData: const FlTitlesData(show: false),
-                        // Subtle horizontal grid for medical look
                         gridData: FlGridData(
                           show: true,
                           drawVerticalLine: false,

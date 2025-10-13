@@ -14,5 +14,14 @@ class AppColors {
 
   // Utility/semantic
   static const Color scaffoldBackground = Color(0xFFF5F5F5); // keep the subtle gray if desired
-  static const Color warning = Colors.redAccent;
+  static const Color warning = Color(0xFFA03232); // soft red for warnings/errors
+  static const Color success = Color(0xFF34b233); // green for success
+  
+
+  // Text colors
+  static const Color textPrimary = Color(0xFF172737);   // deep navy
+  static const Color textSecondary = Color(0xFF51848f); // dark teal
+  static const Color textMuted = Color(0xFF9E9E9E);
+  static const Color textOnPrimary = Colors.white;      // white text on primary color
+      
 }

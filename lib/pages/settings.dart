@@ -1,3 +1,4 @@
+// 📄 lib/pages/settings.dart
 import 'dart:async';
 
 import 'package:audio_session/audio_session.dart';
@@ -21,6 +22,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   String _selectedLanguage = 'English';
   bool _isDataSyncOn = true;
+
   StreamSubscription<Set<AudioDevice>>? _devicesSubscription;
   bool _isUsbMicConnected = false;
   String _deviceStatusText = 'Please connect the CardioScope receiver.';
@@ -34,6 +36,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _initAudioSession();
   }
 
+  // 🎧 Initialize audio session & start listening to device changes
   Future<void> _initAudioSession() async {
     final session = await AudioSession.instance;
     await session.configure(const AudioSessionConfiguration.speech());
@@ -43,19 +46,42 @@ class _SettingsPageState extends State<SettingsPage> {
     _checkConnectedDevices((await session.getDevices()).toList());
   }
 
+  // 🧠 Detect whether the CardioScope receiver (USB mic) is plugged in
   void _checkConnectedDevices(List<AudioDevice> devices) {
     final usbDevice = devices.firstWhere(
       (d) => d.name.toLowerCase().contains('usb'),
       orElse: () => AudioDevice(
-          id: '', name: '', type: AudioDeviceType.unknown, isInput: false, isOutput: false),
+        id: '',
+        name: '',
+        type: AudioDeviceType.unknown,
+        isInput: false,
+        isOutput: false,
+      ),
     );
+
     if (mounted) {
+      final wasConnected = _isUsbMicConnected;
       setState(() {
         _isUsbMicConnected = usbDevice.id.isNotEmpty;
         _deviceStatusText = _isUsbMicConnected
             ? '${usbDevice.name} Connected'
             : 'Please connect the CardioScope receiver.';
       });
+
+      // 🔔 Show toast when status changes
+      if (_isUsbMicConnected != wasConnected) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _isUsbMicConnected
+                  ? 'CardioScope receiver connected'
+                  : 'CardioScope receiver disconnected',
+            ),
+            backgroundColor: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 
@@ -80,10 +106,28 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           _buildSectionHeader('Device Pairing', theme),
           _buildSettingsTile(
-            icon: _isUsbMicConnected ? Icons.usb : Icons.usb_off,
-            iconColor: _isUsbMicConnected ? Colors.green : Colors.grey,
-            title: 'UAC Device Status',
+            icon: Icons.usb_rounded,
+            iconColor: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+            title: 'CardioScope Receiver',
             subtitle: _deviceStatusText,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _isUsbMicConnected ? Icons.circle : Icons.circle_outlined,
+                  color: _isUsbMicConnected ? Colors.green : Colors.grey,
+                  size: 14,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _isUsbMicConnected ? 'Online' : 'Offline',
+                  style: TextStyle(
+                    color: _isUsbMicConnected ? Colors.green : Colors.grey,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
           const Divider(),
           _buildSectionHeader('App Preferences', theme),
@@ -132,7 +176,8 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: () => _showConfirmationDialog(
               context,
               title: 'Clear Cache',
-              content: 'Are you sure you want to clear the app cache? This will not delete patient records.',
+              content:
+                  'Are you sure you want to clear the app cache? This will not delete patient records.',
               confirmText: 'Clear',
               onConfirm: () {},
             ),
@@ -180,6 +225,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // 🌐 Language Dialog
   void _showLanguageDialog() {
     showDialog(
       context: context,
@@ -212,6 +258,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // 🧩 Helper builders
   Widget _buildSectionHeader(String title, ThemeData theme) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
@@ -238,11 +285,15 @@ class _SettingsPageState extends State<SettingsPage> {
       leading: Icon(icon, color: iconColor ?? Theme.of(context).iconTheme.color),
       title: Text(title),
       subtitle: subtitle != null ? Text(subtitle) : null,
-      trailing: trailing ?? (onTap != null ? const Icon(Icons.chevron_right, color: Colors.grey) : null),
+      trailing: trailing ??
+          (onTap != null
+              ? const Icon(Icons.chevron_right, color: Colors.grey)
+              : null),
       onTap: onTap,
     );
   }
 
+  // ⚠️ Confirmation Dialog (used for logout/clear cache)
   void _showConfirmationDialog(
     BuildContext context, {
     required String title,
@@ -261,7 +312,7 @@ class _SettingsPageState extends State<SettingsPage> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            style: TextButton.styleFrom(foregroundColor:const Color(0xFF023F40)),
+            style: TextButton.styleFrom(foregroundColor: AppColors.primary),
             onPressed: () {
               Navigator.of(dialogContext).pop();
               onConfirm();
@@ -273,6 +324,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // 🚪 Logout flow
   Future<void> _logoutAndGoToLogin(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('practitioner_id');
