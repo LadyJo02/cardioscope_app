@@ -77,7 +77,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ? 'CardioScope receiver connected'
                   : 'CardioScope receiver disconnected',
             ),
-            backgroundColor: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+            backgroundColor: _isUsbMicConnected ? AppColors.success : AppColors.warning,
             duration: const Duration(seconds: 2),
           ),
         );
@@ -107,7 +107,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildSectionHeader('Device Pairing', theme),
           _buildSettingsTile(
             icon: Icons.usb_rounded,
-            iconColor: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+            iconColor: _isUsbMicConnected ? AppColors.success : AppColors.warning,
             title: 'CardioScope Receiver',
             subtitle: _deviceStatusText,
             trailing: Row(
@@ -115,14 +115,14 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 Icon(
                   _isUsbMicConnected ? Icons.circle : Icons.circle_outlined,
-                  color: _isUsbMicConnected ? Colors.green : Colors.grey,
+                  color: _isUsbMicConnected ? AppColors.success : Colors.grey,
                   size: 14,
                 ),
                 const SizedBox(width: 6),
                 Text(
                   _isUsbMicConnected ? 'Online' : 'Offline',
                   style: TextStyle(
-                    color: _isUsbMicConnected ? Colors.green : Colors.grey,
+                    color: _isUsbMicConnected ? AppColors.success : Colors.grey,
                     fontWeight: FontWeight.w600,
                   ),
                 ),

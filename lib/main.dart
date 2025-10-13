@@ -80,13 +80,13 @@ class CardioScopeApp extends StatelessWidget {
               brightness: Brightness.light,
               secondary: AppColors.accent,
             ),
-            appBarTheme: const AppBarTheme(
+            appBarTheme: AppBarTheme(
               backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onSurface,
             ),
-            floatingActionButtonTheme: const FloatingActionButtonThemeData(
+            floatingActionButtonTheme: FloatingActionButtonThemeData(
               backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onSurface,
             ),
             useMaterial3: true,
           ),
@@ -98,13 +98,13 @@ class CardioScopeApp extends StatelessWidget {
               brightness: Brightness.dark,
               secondary: AppColors.accent,
             ),
-            appBarTheme: const AppBarTheme(
+            appBarTheme: AppBarTheme(
               backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onSurface,
             ),
-            floatingActionButtonTheme: const FloatingActionButtonThemeData(
+            floatingActionButtonTheme: FloatingActionButtonThemeData(
               backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onSurface,
             ),
             useMaterial3: true,
           ),
@@ -188,7 +188,7 @@ class _MainNavigationState extends State<MainNavigation> {
               onPressed: () => Navigator.of(ctx).pop(true),
               style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white),
+                  foregroundColor: Theme.of(context).colorScheme.onSurface),
               child: const Text('Select Folder'),
             ),
           ],
@@ -315,7 +315,7 @@ class _MainNavigationState extends State<MainNavigation> {
         child: FloatingActionButton.large(
           onPressed: _handleMicPressed,
           backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
+          foregroundColor: Theme.of(context).colorScheme.onSurface,
           elevation: 8.0,
           shape: const CircleBorder(),
           child: const Icon(Icons.mic, size: 40),
@@ -323,9 +323,9 @@ class _MainNavigationState extends State<MainNavigation> {
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: BottomAppBar(
-        color: Theme.of(context).bottomAppBarTheme.color ?? Colors.white,
+        color: Theme.of(context).bottomAppBarTheme.color ?? Theme.of(context).colorScheme.onSurface,
         surfaceTintColor:
-            Theme.of(context).bottomAppBarTheme.surfaceTintColor ?? Colors.white,
+            Theme.of(context).bottomAppBarTheme.surfaceTintColor ?? Theme.of(context).colorScheme.onSurface,
         shape: const CircularNotchedRectangle(),
         notchMargin: 10.0,
         height: 70,

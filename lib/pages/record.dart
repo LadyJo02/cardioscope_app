@@ -118,7 +118,7 @@ class _RecordPageState extends State<RecordPage> {
                   ? 'CardioScope receiver connected'
                   : 'CardioScope receiver disconnected',
             ),
-            backgroundColor: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+            backgroundColor: _isUsbMicConnected ? AppColors.success : AppColors.warning,
             duration: const Duration(seconds: 2),
           ),
         );
@@ -413,9 +413,9 @@ class _RecordPageState extends State<RecordPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Record Heart Sound', style: TextStyle(color: Colors.white)),
+        title: Text('Record Heart Sound', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
         backgroundColor: AppColors.primary,
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.onSurface),
       ),
       body: Padding(
         padding: const EdgeInsets.symmetric(vertical: 16.0),
@@ -438,14 +438,14 @@ class _RecordPageState extends State<RecordPage> {
                     width: ButtonConstants.micButtonSize,
                     height: ButtonConstants.micButtonSize,
                     decoration: BoxDecoration(
-                      color: _isRecording ? Colors.white : AppColors.primary,
+                      color: _isRecording ? Theme.of(context).colorScheme.onSurface : AppColors.primary,
                       shape: BoxShape.circle,
                       border: _isRecording
                           ? Border.all(color: AppColors.primary, width: 4)
                           : null,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.15),
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.15),
                           blurRadius: 8,
                           offset: const Offset(0, 4),
                         )
@@ -456,7 +456,7 @@ class _RecordPageState extends State<RecordPage> {
                           ? const CircularProgressIndicator(color: AppColors.primary)
                           : Icon(
                               _isRecording ? Icons.stop_rounded : Icons.mic,
-                              color: _isRecording ? AppColors.primary : Colors.white,
+                              color: _isRecording ? AppColors.primary : Theme.of(context).colorScheme.onSurface,
                               size: 50,
                             ),
                     ),
@@ -465,7 +465,7 @@ class _RecordPageState extends State<RecordPage> {
               ),
             ),
             const SizedBox(height: 16),
-            Text(instructionText, style: const TextStyle(fontSize: 16, color: Colors.grey)),
+            Text(instructionText, style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 8),
           ],
         ),
@@ -481,11 +481,11 @@ class _RecordPageState extends State<RecordPage> {
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       decoration: BoxDecoration(
         color: _isUsbMicConnected
-            ? Colors.green.withValues(alpha: 0.15)
-            : Colors.redAccent.withValues(alpha: 0.12),
+            ? AppColors.success.withValues(alpha: 0.15)
+            : AppColors.warning.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+          color: _isUsbMicConnected ? AppColors.success : AppColors.warning,
           width: 0.8,
         ),
       ),
@@ -494,14 +494,14 @@ class _RecordPageState extends State<RecordPage> {
         children: [
           Icon(
             _isUsbMicConnected ? Icons.usb_rounded : Icons.usb_off_rounded,
-            color: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+            color: _isUsbMicConnected ? AppColors.success : AppColors.warning,
             size: 18,
           ),
           const SizedBox(width: 8),
           Text(
             _isUsbMicConnected ? "Receiver Connected" : "Receiver Disconnected",
             style: TextStyle(
-              color: _isUsbMicConnected ? Colors.green : Colors.redAccent,
+              color: _isUsbMicConnected ? AppColors.success : AppColors.warning,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -525,16 +525,16 @@ class _RecordPageState extends State<RecordPage> {
           margin: const EdgeInsets.symmetric(horizontal: 12.0),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.onSurface,
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.08),
                 blurRadius: 8,
                 offset: const Offset(0, 3),
               )
             ],
-            border: Border.all(color: Colors.grey.shade300),
+            border: Border.all(color: Theme.of(context).colorScheme.onSurface),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -547,17 +547,17 @@ class _RecordPageState extends State<RecordPage> {
                   style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w500,
-                    color: hasPatient ? Colors.black : Colors.grey,
+                    color: hasPatient ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
               ]),
               TextButton.icon(
                 onPressed: isDisabled ? null : _switchPatient,
                 icon: Icon(Icons.swap_horiz_rounded,
-                    color: isDisabled ? Colors.grey : AppColors.primary),
+                    color: isDisabled ? Theme.of(context).colorScheme.onSurface : AppColors.primary),
                 label: Text(
                   hasPatient ? "Switch" : "Add",
-                  style: TextStyle(color: isDisabled ? Colors.grey : AppColors.primary),
+                  style: TextStyle(color: isDisabled ? Theme.of(context).colorScheme.onSurface : AppColors.primary),
                 ),
               ),
             ],
@@ -606,20 +606,20 @@ class _RecordPageState extends State<RecordPage> {
             margin: const EdgeInsets.symmetric(horizontal: 24.0),
             padding: const EdgeInsets.symmetric(vertical: 8.0),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.onSurface,
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.2),
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 )
               ],
             ),
             child: _spots.isEmpty
-                ? const Center(
+                ? Center(
                     child:
-                        Text('Waiting for audio data...', style: TextStyle(color: Colors.grey)))
+                        Text('Waiting for audio data...', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)))
                 : ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: LineChart(
@@ -630,7 +630,7 @@ class _RecordPageState extends State<RecordPage> {
                           drawVerticalLine: false,
                           horizontalInterval: 0.5,
                           getDrawingHorizontalLine: (v) => FlLine(
-                            color: Colors.grey.withValues(alpha: 0.12),
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.12),
                             strokeWidth: 0.6,
                           ),
                         ),
