@@ -34,14 +34,18 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   late Map<String, double> _currentProbabilities;
   String _practitionerName = "Practitioner";
 
+  // ✅ Local mutable copy of report
+  late Map<String, dynamic> _localReport;
+
   @override
   void initState() {
     super.initState();
+    _localReport = Map<String, dynamic>.from(widget.report);
     _waveformFuture = _loadWaveformData();
     _initializeState();
     _loadPractitionerName();
 
-    final path = widget.report['file_path'] as String?;
+    final path = _localReport['file_path'] as String?;
     if (path != null && File(path).existsSync()) {
       _player.setFilePath(path).catchError((e) {
         debugPrint("❌ Could not load audio file: $e");
@@ -54,15 +58,16 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
       setState(() {
-        _practitionerName = prefs.getString('practitioner_name') ?? 'Practitioner';
+        _practitionerName =
+            prefs.getString('practitioner_name') ?? 'Practitioner';
       });
     }
   }
 
   void _initializeState() {
-    _currentDiagnosis = widget.report['diagnosis'] ?? 'N/A';
+    _currentDiagnosis = _localReport['diagnosis'] ?? 'N/A';
     _currentProbabilities = {};
-    final probsJson = widget.report['probabilities'] as String?;
+    final probsJson = _localReport['probabilities'] as String?;
     if (probsJson != null) {
       try {
         final decoded = jsonDecode(probsJson) as Map<String, dynamic>;
@@ -82,7 +87,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   }
 
   Future<List<FlSpot>> _loadWaveformData() async {
-    final path = widget.report['file_path'] as String?;
+    final path = _localReport['file_path'] as String?;
     if (path == null) return [];
     final file = File(path);
     if (!await file.exists()) return [];
@@ -114,21 +119,15 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     return spots;
   }
 
-  String _formatDuration(Duration d) {
-    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return "$minutes:$seconds";
-  }
-
   Future<void> _generateMelIfNeeded() async {
     if (_melPng != null) return;
-    final filePath = widget.report['file_path'] as String?;
+    final filePath = _localReport['file_path'] as String?;
     if (filePath == null) return;
 
     if (!mounted) return;
     setState(() => _isReanalyzing = true);
-
     debugPrint("🎨 Generating Mel-Spectrogram for: $filePath");
+
     final bytes = await _tfliteService.generateMelImageBytes(filePath);
 
     if (!mounted) return;
@@ -136,13 +135,13 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       _melPng = bytes;
       _isReanalyzing = false;
     });
+
     debugPrint("✅ Spectrogram generation complete.");
   }
 
   Future<void> _reAnalyze() async {
-    final filePath = widget.report['file_path'] as String?;
-    final recordId = widget.report['record_id'] as int?;
-
+    final filePath = _localReport['file_path'] as String?;
+    final recordId = _localReport['record_id'] as int?;
     if (filePath == null || recordId == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -152,7 +151,6 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     }
 
     setState(() => _isReanalyzing = true);
-
     try {
       final result = await _tfliteService.runInference(filePath: filePath);
       if (result == null) {
@@ -181,7 +179,6 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       );
 
       final melBytes = await _tfliteService.generateMelImageBytes(filePath);
-
       if (!mounted) return;
       setState(() {
         _currentDiagnosis = diagnosis;
@@ -197,16 +194,17 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _isReanalyzing = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Re-analysis failed: $e")),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Re-analysis failed: $e")));
     }
   }
 
   Future<void> _showEditDialog() async {
-    final nameCtrl = TextEditingController(text: widget.report['name'] ?? '');
-    final genderCtrl = TextEditingController(text: widget.report['gender'] ?? '');
-    final birthdayCtrl = TextEditingController(text: widget.report['birthday'] ?? '');
+    final db = DatabaseHelper.instance;
+    final nameCtrl = TextEditingController(text: _localReport['name'] ?? '');
+    final genderCtrl = TextEditingController(text: _localReport['gender'] ?? '');
+    final birthdayCtrl =
+        TextEditingController(text: _localReport['birthday'] ?? '');
 
     await showDialog(
       context: context,
@@ -214,9 +212,13 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
         title: const Text("Edit Patient Info"),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Name")),
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: "Name")),
             const SizedBox(height: 8),
-            TextField(controller: genderCtrl, decoration: const InputDecoration(labelText: "Gender")),
+            TextField(
+                controller: genderCtrl,
+                decoration: const InputDecoration(labelText: "Gender")),
             const SizedBox(height: 8),
             TextField(
               controller: birthdayCtrl,
@@ -228,19 +230,24 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
               onTap: () async {
                 DateTime? picked = await showDatePicker(
                   context: context,
-                  initialDate: DateTime.tryParse(birthdayCtrl.text) ?? DateTime(2000),
+                  initialDate:
+                      DateTime.tryParse(birthdayCtrl.text) ?? DateTime(2000),
                   firstDate: DateTime(1900),
                   lastDate: DateTime.now(),
                 );
                 if (picked != null) {
-                  birthdayCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
+                  birthdayCtrl.text =
+                      DateFormat('yyyy-MM-dd').format(picked);
                 }
               },
             ),
           ]),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
@@ -248,8 +255,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
             ),
             child: const Text("Save"),
             onPressed: () async {
-              final db = DatabaseHelper.instance;
-              final patientId = widget.report['patient_id'] as int?;
+              final patientId = _localReport['patient_id'] as int?;
               if (patientId != null) {
                 await db.database.then((conn) {
                   conn.update(
@@ -263,17 +269,22 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                     whereArgs: [patientId],
                   );
                 });
+
+                if (!context.mounted) return;
+                final updated = Map<String, dynamic>.from(_localReport);
+                updated['name'] = nameCtrl.text.trim();
+                updated['gender'] = genderCtrl.text.trim();
+                updated['birthday'] = birthdayCtrl.text.trim();
+
                 setState(() {
-                  widget.report['name'] = nameCtrl.text.trim();
-                  widget.report['gender'] = genderCtrl.text.trim();
-                  widget.report['birthday'] = birthdayCtrl.text.trim();
+                  _localReport = updated;
                 });
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("✅ Patient info updated.")),
+                );
+                Navigator.pop(context, true);
               }
-              if (!context.mounted) return;
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("✅ Patient info updated.")),
-              );
             },
           ),
         ],
@@ -282,19 +293,22 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   }
 
   Future<void> _confirmDelete() async {
-    final recordId = widget.report['record_id'] as int?;
+    final recordId = _localReport['record_id'] as int?;
     if (recordId == null) return;
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Delete Record"),
-        content: const Text("Are you sure you want to delete this record? This cannot be undone."),
+        title: const Text("Confirm Delete"),
+        content: const Text(
+            "Are you sure you want to delete this record? This cannot be undone."),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel")),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
+              backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(context, true),
@@ -309,8 +323,9 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       await db.deleteRecordById(recordId);
       if (!mounted) return;
       Navigator.pop(context, true);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text("🗑 Record deleted successfully.")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("🗑 Report deleted successfully.")),
+      );
     }
   }
 
@@ -323,7 +338,9 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           content: const Text(
               "Please generate the Mel-Spectrogram before exporting the report to PDF."),
           actions: [
-            TextButton(child: const Text("Cancel"), onPressed: () => Navigator.pop(context)),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Cancel")),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
@@ -343,13 +360,13 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
     await PdfExporter.exportSingleReport(
       report: {
-        'patient_id': widget.report['patient_id'],
-        'name': widget.report['name'],
-        'birthday': widget.report['birthday'],
-        'age': widget.report['age'],
-        'gender': widget.report['gender'],
-        'file_path': widget.report['file_path'],
-        'record_date': widget.report['record_date'],
+        'patient_id': _localReport['patient_id'],
+        'name': _localReport['name'],
+        'birthday': _localReport['birthday'],
+        'age': _localReport['age'],
+        'gender': _localReport['gender'],
+        'file_path': _localReport['file_path'],
+        'record_date': _localReport['record_date'],
         'diagnosis': _currentDiagnosis,
         'probabilities': _currentProbabilities,
       },
@@ -357,21 +374,156 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     );
   }
 
-  Widget _buildCard(BuildContext context, {required String title, required Widget child}) {
+  @override
+  Widget build(BuildContext context) {
+    final recordDate = _localReport['record_date'];
+    String dateString = 'N/A';
+    if (recordDate is String) {
+      try {
+        dateString =
+            DateFormat('MMMM d, yyyy HH:mm').format(DateTime.parse(recordDate));
+      } catch (_) {}
+    }
+
+    final patientId = _localReport['patient_id'];
+    final patientIdFormatted = patientId != null
+        ? DatabaseHelper.instance.formatPatientId(patientId as int)
+        : 'N/A';
+
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: AppColors.primary,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: Text(
+          'Report for ${_localReport['name'] ?? 'Unnamed'}',
+          style: const TextStyle(color: Colors.white),
+        ),
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            onSelected: (value) {
+              if (value == 'reanalyze') _reAnalyze();
+              if (value == 'edit') _showEditDialog();
+              if (value == 'delete') _confirmDelete();
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'reanalyze',
+                child: Row(children: [
+                  Icon(Icons.refresh, color: AppColors.deep),
+                  SizedBox(width: 8),
+                  Text("Re-analyze"),
+                ]),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'edit',
+                child: Row(children: [
+                  Icon(Icons.edit, color: AppColors.deep),
+                  SizedBox(width: 8),
+                  Text("Edit Patient Info"),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(children: [
+                  Icon(Icons.delete, color: AppColors.warning),
+                  SizedBox(width: 8),
+                  Text("Delete Record"),
+                ]),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildDetailSection(patientIdFormatted, dateString),
+            const SizedBox(height: 16),
+            _buildAnalysisSection(),
+            const SizedBox(height: 16),
+            _buildSpectrogramSection(),
+            const SizedBox(height: 16),
+            _buildWaveformSection(),
+            const SizedBox(height: 80),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: AppColors.primary,
+        icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+        label:
+            const Text("Export PDF", style: TextStyle(color: Colors.white)),
+        onPressed: _handleExportPdf,
+      ),
+    );
+  }
+
+  Widget _buildDetailSection(String patientIdFormatted, String dateString) {
     return Card(
       color: Colors.white,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title,
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text("Patient Details",
               style: Theme.of(context)
                   .textTheme
                   .titleLarge
                   ?.copyWith(fontWeight: FontWeight.bold)),
           const Divider(height: 20),
-          child,
+          _buildRow('Patient ID:', patientIdFormatted),
+          _buildRow('Name:', _localReport['name'] ?? 'Unnamed'),
+          _buildRow('Birthday:', _localReport['birthday'] ?? 'N/A'),
+          _buildRow('Age:', _localReport['age']?.toString() ?? 'N/A'),
+          _buildRow('Gender:', _localReport['gender'] ?? 'N/A'),
+          _buildRow('File:', (_localReport['file_path'] ?? '').split('/').last),
+          _buildRow('Recorded:', dateString),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(children: [
+        Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, color: Colors.black54))),
+        Expanded(child: Text(value, textAlign: TextAlign.end)),
+      ]),
+    );
+  }
+
+  Widget _buildAnalysisSection() {
+    return Card(
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text("AI Analysis",
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold)),
+          const Divider(height: 20),
+          _buildRow('Classification:', _currentDiagnosis),
+          const SizedBox(height: 10),
+          if (_currentProbabilities.isNotEmpty)
+            ..._currentProbabilities.entries
+                .map((entry) => _buildProbabilityRow(entry.key, entry.value))
+          else
+            const Text("No probabilities available.")
         ]),
       ),
     );
@@ -381,7 +533,10 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(children: [
-        Expanded(flex: 2, child: Text(label, style: TextStyle(color: Colors.grey.shade700))),
+        Expanded(
+            flex: 2,
+            child: Text(label,
+                style: TextStyle(color: Colors.grey.shade700))),
         Expanded(
           flex: 5,
           child: LinearProgressIndicator(
@@ -393,10 +548,106 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           ),
         ),
         Expanded(
-          flex: 2,
-          child: Text("${(value * 100).toStringAsFixed(2)}%", textAlign: TextAlign.end),
-        ),
+            flex: 2,
+            child: Text("${(value * 100).toStringAsFixed(2)}%",
+                textAlign: TextAlign.end)),
       ]),
+    );
+  }
+
+  Widget _buildSpectrogramSection() {
+    return Card(
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+          Text("Model Input (Mel-Spectrogram)",
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold)),
+          const Divider(height: 20),
+          if (_melPng != null)
+            ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.memory(
+                  _melPng!, 
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              )
+          else if (_isReanalyzing)
+            const Center(child: CircularProgressIndicator())
+          else
+            Column(children: [
+              const Text('Spectrogram not yet generated.'),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white),
+                onPressed: _generateMelIfNeeded,
+                child: const Text('Generate Spectrogram'),
+              ),
+            ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildWaveformSection() {
+    return Card(
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(children: [
+          Text("Raw Waveform & Playback",
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold)),
+          const Divider(height: 20),
+          SizedBox(
+            height: 150,
+            child: FutureBuilder<List<FlSpot>>(
+              future: _waveformFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const Center(child: Text('No waveform available'));
+                }
+                return LineChart(LineChartData(
+                  titlesData: const FlTitlesData(show: false),
+                  gridData: const FlGridData(show: false),
+                  borderData: FlBorderData(show: false),
+                  minY: -1,
+                  maxY: 1,
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: snapshot.data!,
+                      isCurved: false,
+                      color: AppColors.primary,
+                      barWidth: 1.2,
+                      dotData: const FlDotData(show: false),
+                    ),
+                  ],
+                  lineTouchData: const LineTouchData(enabled: false),
+                ));
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildPlaybackControls(),
+        ]),
+      ),
     );
   }
 
@@ -430,238 +681,8 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
               }
             },
           ),
-          Row(children: [
-            StreamBuilder<Duration>(
-              stream: _player.positionStream,
-              builder: (context, snapshot) {
-                final position = snapshot.data ?? Duration.zero;
-                return Text(_formatDuration(position));
-              },
-            ),
-            Expanded(
-              child: StreamBuilder<Duration?>(
-                stream: _player.durationStream,
-                builder: (context, snapshot) {
-                  final duration = snapshot.data ?? Duration.zero;
-                  return Slider(
-                    value: _player.position.inMilliseconds
-                        .toDouble()
-                        .clamp(0.0, duration.inMilliseconds.toDouble()),
-                    onChanged: (value) {
-                      _player.seek(Duration(milliseconds: value.toInt()));
-                    },
-                    min: 0.0,
-                    max: duration.inMilliseconds.toDouble(),
-                    activeColor: AppColors.primary,
-                    inactiveColor: Colors.grey.shade300,
-                  );
-                },
-              ),
-            ),
-            Text(_formatDuration(_player.duration ?? Duration.zero)),
-          ]),
         ]);
       },
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(children: [
-        Expanded(
-            child: Text(label,
-                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black54))),
-        Expanded(child: Text(value, textAlign: TextAlign.end)),
-      ]),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final recordDate = widget.report['record_date'];
-    String dateString = 'N/A';
-    if (recordDate is String) {
-      try {
-        dateString = DateFormat('MMMM d, yyyy HH:mm').format(DateTime.parse(recordDate));
-      } catch (_) {}
-    }
-
-    final patientId = widget.report['patient_id'];
-    final patientIdFormatted = patientId != null
-        ? DatabaseHelper.instance.formatPatientId(patientId as int)
-        : 'N/A';
-
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: AppColors.primary,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(
-          'Report for ${widget.report['name'] ?? 'Unnamed'}',
-          style: const TextStyle(color: Colors.white),
-        ),
-        actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: Colors.white),
-            onSelected: (value) {
-              if (value == 'reanalyze') _reAnalyze();
-              if (value == 'edit') _showEditDialog();
-              if (value == 'delete') _confirmDelete();
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'reanalyze',
-                child: Row(children: [
-                  Icon(Icons.refresh, color: AppColors.deep),
-                  SizedBox(width: 8),
-                  Text("Re-analyze"),
-                ]),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'edit',
-                child: Row(children: [
-                  Icon(Icons.edit, color: AppColors.deep),
-                  SizedBox(width: 8),
-                  Text("Edit Patient Info"),
-                ]),
-              ),
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(children: [
-                  Icon(Icons.delete, color: AppColors.warning),
-                  SizedBox(width: 8),
-                  Text("Delete Record"),
-                ]),
-              ),
-            ],
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          _buildCard(
-            context,
-            title: 'Patient Details',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildDetailRow('Patient ID:', patientIdFormatted),
-                _buildDetailRow('Name:', widget.report['name'] ?? 'Unnamed'),
-                _buildDetailRow(
-                    'Birthday:',
-                    (() {
-                      final bday = widget.report['birthday'];
-                      if (bday == null || bday.toString().isEmpty) return 'N/A';
-                      try {
-                        return DateFormat('MMMM d, yyyy').format(DateTime.parse(bday));
-                      } catch (_) {
-                        return bday.toString();
-                      }
-                    })()),
-                _buildDetailRow('Age:', widget.report['age']?.toString() ?? 'N/A'),
-                _buildDetailRow('Gender:', widget.report['gender'] ?? 'N/A'),
-                _buildDetailRow('File:', (widget.report['file_path'] ?? '').split('/').last),
-                _buildDetailRow('Recorded:', dateString),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          _buildCard(
-            context,
-            title: 'AI Analysis',
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _buildDetailRow('Classification:', _currentDiagnosis),
-              if (_currentProbabilities.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                const Text("Detailed Breakdown:",
-                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black54)),
-                const SizedBox(height: 8),
-                ..._currentProbabilities.entries
-                    .map((entry) => _buildProbabilityRow(entry.key, entry.value)),
-              ] else ...[
-                const SizedBox(height: 8),
-                const Text("No probabilities available.")
-              ]
-            ]),
-          ),
-          const SizedBox(height: 16),
-          _buildCard(
-            context,
-            title: 'Model Input (Mel-Spectrogram)',
-            child: Column(children: [
-              if (_melPng != null)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(_melPng!,
-                      width: double.infinity, fit: BoxFit.cover),
-                )
-              else if (_isReanalyzing)
-                const Center(child: CircularProgressIndicator())
-              else
-                Column(children: [
-                  const Text('Spectrogram not yet generated.'),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: _generateMelIfNeeded,
-                    child: const Text('Generate Spectrogram'),
-                  )
-                ])
-            ]),
-          ),
-          const SizedBox(height: 16),
-          _buildCard(
-            context,
-            title: 'Raw Waveform & Playback',
-            child: Column(children: [
-              SizedBox(
-                height: 150,
-                child: FutureBuilder<List<FlSpot>>(
-                  future: _waveformFuture,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                      return const Center(child: Text('No waveform available'));
-                    }
-                    return LineChart(LineChartData(
-                      titlesData: const FlTitlesData(show: false),
-                      gridData: const FlGridData(show: false),
-                      borderData: FlBorderData(show: false),
-                      minY: -1,
-                      maxY: 1,
-                      lineBarsData: [
-                        LineChartBarData(
-                            spots: snapshot.data!,
-                            isCurved: false,
-                            color: AppColors.primary,
-                            barWidth: 1.2,
-                            dotData: const FlDotData(show: false)),
-                      ],
-                      lineTouchData: const LineTouchData(enabled: false),
-                    ));
-                  },
-                ),
-              ),
-              const SizedBox(height: 12),
-              _buildPlaybackControls(),
-            ]),
-          ),
-          const SizedBox(height: 80),
-        ]),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppColors.primary,
-        icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
-        label: const Text("Export PDF", style: TextStyle(color: Colors.white)),
-        onPressed: _handleExportPdf,
-      ),
     );
   }
 }

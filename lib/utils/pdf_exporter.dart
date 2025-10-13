@@ -130,7 +130,7 @@ class PdfExporter {
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Text(
-              "CardioScope Diagnostic Report",
+              "CardioScope Report",
               style: pw.TextStyle(
                 fontSize: 20,
                 fontWeight: pw.FontWeight.bold,
@@ -229,12 +229,22 @@ class PdfExporter {
               pw.Container(
                 width: contentWidth,
                 height: 160,
+                margin: const pw.EdgeInsets.only(top: 6),
                 decoration: pw.BoxDecoration(
                   border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
                   borderRadius: pw.BorderRadius.circular(5),
+                  color: PdfColors.white,
                 ),
                 child: melImage != null
-                    ? pw.Image(melImage, fit: pw.BoxFit.cover)
+                          ? pw.ClipRRect(
+                              horizontalRadius: 5,
+                              verticalRadius: 5,
+                              child: pw.Image(
+                                melImage,
+                                fit: pw.BoxFit.fill,             // ✅ full visible, not cropped
+                                alignment: pw.Alignment.topCenter, // ✅ start from top
+                              ),
+                            )
                     : pw.Center(
                         child: pw.Text("Spectrogram unavailable",
                             style:

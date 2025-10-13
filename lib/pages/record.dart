@@ -2,8 +2,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:cardioscope_app/pages/report_generated.dart';
 import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/services/tflite_service.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
@@ -16,7 +18,6 @@ import 'package:intl/intl.dart';
 import 'package:record/record.dart' as file_recorder;
 
 import '../database_helper.dart';
-import 'report_generated.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -26,7 +27,10 @@ class RecordPage extends StatefulWidget {
 }
 
 class _RecordPageState extends State<RecordPage> {
+  // === Recording config ===
   static const int _recordingDurationInSeconds = 5;
+  static const int _visiblePoints = 1000; // ~ rolling window width (affects scroll speed)
+  static const double _smoothAlpha = 0.15; // EMA smoothing strength for samples
 
   final FlutterSoundRecorder _dataStreamer = FlutterSoundRecorder();
   final file_recorder.AudioRecorder _fileRecorder = file_recorder.AudioRecorder();
@@ -39,9 +43,11 @@ class _RecordPageState extends State<RecordPage> {
 
   bool _isRecording = false;
   bool _isProcessing = false;
+
+  // Rolling chart data
   List<FlSpot> _spots = [];
-  double _timeCounter = 0;
-  final int _maxDataPoints = 500;
+  double _timeCounter = 0; // we treat this like an index; not seconds
+  double _displayGain = 1.0; // soft auto-gain with decay for stable visual amplitude
 
   Timer? _timer;
   Timer? _recordingTimer;
@@ -57,7 +63,7 @@ class _RecordPageState extends State<RecordPage> {
 
   Future<void> _init() async {
     await _dataStreamer.openRecorder();
-    // Load only preprocessor for visualization, classifier loads dynamically in runInference
+    // Load only preprocessor for visualization; classifier loads dynamically in runInference
     await _tfliteService.loadModels(loadClassifier: false);
     await _loadCurrentPatient();
   }
@@ -131,6 +137,7 @@ class _RecordPageState extends State<RecordPage> {
       _spots = [];
       _timeCounter = 0;
       _duration = Duration.zero;
+      _displayGain = 1.0;
     });
 
     _startTimer();
@@ -183,7 +190,7 @@ class _RecordPageState extends State<RecordPage> {
         _isProcessing = false;
         _isRecording = false;
       });
-      return; // ⛔ Stop early — don’t analyze or save
+      return;
     }
 
     _dataSubscription?.cancel();
@@ -325,23 +332,58 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
+  // === Real-time rolling PCG waveform ===
   void _updateWaveform(Uint8List rawData) {
-    final byteData = rawData.buffer.asByteData();
-    final samples = <double>[];
+    if (!mounted) return;
+
+    // PCM16 -> double [-1, 1]
+    final bd = rawData.buffer.asByteData();
+    final tmp = <double>[];
     for (int i = 0; i < rawData.lengthInBytes; i += 2) {
-      samples.add(byteData.getInt16(i, Endian.little) / 32768.0);
+      tmp.add(bd.getInt16(i, Endian.little) / 32768.0);
     }
-    if (mounted) {
-      setState(() {
-        for (var sample in samples) {
-          _spots.add(FlSpot(_timeCounter, sample));
-          _timeCounter += 1;
-        }
-        while (_spots.length > _maxDataPoints) {
-          _spots.removeAt(0);
-        }
-      });
+
+    // Downsample with simple average + EMA smoothing to reduce jitter
+    const int step = 100; // larger = slower scroll (~25ms per point at 4kHz)
+    const double timeStep = 0.007; // seconds per plotted point (7 ms visual rate)
+    
+    final reduced = <double>[];
+    double prev = 0.0;
+    for (int i = 0; i < tmp.length; i += step) {
+      double avg = 0;
+      int count = 0;
+      for (int j = i; j < i + step && j < tmp.length; j++) {
+        avg += tmp[j];
+        count++;
+      }
+      avg /= (count == 0 ? 1 : count);
+
+      // Exponential smoothing (softens sharp transitions)
+      final smoothed = prev + _smoothAlpha * (avg - prev);
+      prev = smoothed;
+      reduced.add(smoothed);
     }
+
+    // Soft auto-gain with slow response (prevents jumpy scaling)
+    final peak = reduced.fold(1e-6, (double m, e) => math.max(m, e.abs()));
+    double targetGain = 1 / (peak * 1.2); // leave headroom
+    targetGain = targetGain.clamp(0.8, 6.0); // keep within sensible bounds
+    _displayGain = 0.90 * _displayGain + 0.10 * targetGain;
+    
+
+    setState(() {
+      for (final s in reduced) {
+        _timeCounter += timeStep;
+        final value = (s * _displayGain).clamp(-1.0, 1.0);
+        _spots.add(FlSpot(_timeCounter, value));
+      }
+
+       // Keep last few seconds visible (like hospital monitor)
+      const int maxVisible = 1000;
+      if (_spots.length > _visiblePoints) {
+        _spots = _spots.sublist(_spots.length - maxVisible);
+      }
+    });
   }
 
   void _startTimer() {
@@ -506,6 +548,9 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   Widget _buildRecordingView() {
+    final double minX = _spots.isNotEmpty ? math.max(0, _spots.last.x - _visiblePoints) : 0;
+    final double maxX = _spots.isNotEmpty ? _spots.last.x : _visiblePoints.toDouble();
+
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -534,20 +579,33 @@ class _RecordPageState extends State<RecordPage> {
                     child: LineChart(
                       LineChartData(
                         titlesData: const FlTitlesData(show: false),
-                        gridData: const FlGridData(show: false),
+                        // Subtle horizontal grid for medical look
+                        gridData: FlGridData(
+                          show: true,
+                          drawVerticalLine: false,
+                          horizontalInterval: 0.5,
+                          getDrawingHorizontalLine: (v) => FlLine(
+                            color: Colors.grey.withValues(alpha: 0.12),
+                            strokeWidth: 0.6,
+                          ),
+                        ),
                         borderData: FlBorderData(show: false),
+                        clipData: const FlClipData.all(),
+                        minY: -1.2,
+                        maxY: 1.2,
+                        minX: minX,
+                        maxX: maxX,
+                        lineTouchData: const LineTouchData(enabled: false),
                         lineBarsData: [
                           LineChartBarData(
                             spots: _spots,
-                            isCurved: false,
+                            isCurved: true,
                             color: AppColors.primary,
-                            barWidth: 1.5,
+                            barWidth: 2.0,
+                            isStrokeCapRound: true,
                             dotData: const FlDotData(show: false),
                           ),
                         ],
-                        minY: -1.0,
-                        maxY: 1.0,
-                        lineTouchData: const LineTouchData(enabled: false),
                       ),
                     ),
                   ),

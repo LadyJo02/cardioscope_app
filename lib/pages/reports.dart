@@ -195,9 +195,13 @@ class ReportsPageState extends State<ReportsPage>
         title: const Text("Edit Patient Info"),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Name")),
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: "Name")),
             const SizedBox(height: 8),
-            TextField(controller: genderCtrl, decoration: const InputDecoration(labelText: "Gender")),
+            TextField(
+                controller: genderCtrl,
+                decoration: const InputDecoration(labelText: "Gender")),
             const SizedBox(height: 8),
             TextField(
               controller: birthdayCtrl,
@@ -209,7 +213,8 @@ class ReportsPageState extends State<ReportsPage>
               onTap: () async {
                 DateTime? picked = await showDatePicker(
                   context: context,
-                  initialDate: DateTime.tryParse(birthdayCtrl.text) ?? DateTime(2000),
+                  initialDate:
+                      DateTime.tryParse(birthdayCtrl.text) ?? DateTime(2000),
                   firstDate: DateTime(1900),
                   lastDate: DateTime.now(),
                 );
@@ -242,12 +247,15 @@ class ReportsPageState extends State<ReportsPage>
                     whereArgs: [patientId],
                   );
                 });
-                if (!context.mounted) return; 
+                if (!context.mounted) return;
 
-                setState(() {
-                  report['name'] = nameCtrl.text.trim();
-                  report['gender'] = genderCtrl.text.trim();
-                  report['birthday'] = birthdayCtrl.text.trim();
+                setState(() {final updated = Map<String, dynamic>.from(report);
+                  updated['name'] = nameCtrl.text.trim();
+                  updated['gender'] = genderCtrl.text.trim();
+                  updated['birthday'] = birthdayCtrl.text.trim();
+                  final index = _filteredReports.indexOf(report);
+                  if (index != -1) _filteredReports[index] = updated;
+
                 });
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text("✅ Patient info updated.")),
@@ -356,7 +364,8 @@ class ReportsPageState extends State<ReportsPage>
                                   : 'N/A';
                               String date = '';
                               try {
-                                final raw = r['analysis_date'] ?? r['record_date'];
+                                final raw =
+                                    r['analysis_date'] ?? r['record_date'];
                                 if (raw is String && raw.isNotEmpty) {
                                   date = DateFormat('yyyy-MM-dd HH:mm')
                                       .format(DateTime.parse(raw));
@@ -369,63 +378,92 @@ class ReportsPageState extends State<ReportsPage>
                                 background: Container(
                                   color: AppColors.warning,
                                   alignment: Alignment.centerRight,
-                                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                                  child: const Icon(Icons.delete, color: Colors.white),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 20),
+                                  child: const Icon(Icons.delete,
+                                      color: Colors.white),
                                 ),
                                 confirmDismiss: (_) async {
                                   return await showDialog<bool>(
-                                    context: context,
-                                    builder: (context) => AlertDialog(
-                                      title: const Text("Confirm Delete"),
-                                    content: const Text("Are you sure you want to delete this report?"),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context, false),
-                                        child: const Text("Cancel"),
-                                      ),
-                                      // ⬇️ Replace your old button with this fixed version:
-                                      ElevatedButton(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: AppColors.primary,
-                                          foregroundColor: Colors.white,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(8),
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          title:
+                                              const Text("Confirm Delete"),
+                                          content: const Text(
+                                              "Are you sure you want to delete this report?"),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(
+                                                      context, false),
+                                              child:
+                                                  const Text("Cancel"),
                                             ),
-                                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                          textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                                            ElevatedButton(
+                                              style: ElevatedButton
+                                                  .styleFrom(
+                                                backgroundColor:
+                                                    AppColors.primary,
+                                                foregroundColor:
+                                                    Colors.white,
+                                                shape:
+                                                    RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          8),
+                                                ),
+                                                padding:
+                                                    const EdgeInsets
+                                                        .symmetric(
+                                                            horizontal:
+                                                                20,
+                                                            vertical:
+                                                                10),
+                                                textStyle: const TextStyle(
+                                                    fontWeight:
+                                                        FontWeight
+                                                            .w600),
+                                              ),
+                                              onPressed: () =>
+                                                  Navigator.pop(
+                                                      context, true),
+                                              child:
+                                                  const Text("Delete"),
+                                            ),
+                                          ],
                                         ),
-                                        onPressed: () => Navigator.pop(context, true),
-                                        child: const Text("Delete"),
-                                      ),
-                                    ],
-                                  ),
-                                  ) ?? false;
+                                      ) ??
+                                      false;
                                 },
-
                                 onDismissed: (_) async {
-                                  await db.deleteRecordById(r['record_id']);
-                                  if (!context.mounted) return; 
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                        content: Text("Report deleted.")),
-                                  );
-                                  setState(() => _filteredReports.removeAt(i));
+                                  await db.deleteRecordById(
+                                      r['record_id']);
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context)
+                                      .showSnackBar(const SnackBar(
+                                          content: Text(
+                                              "🗑 Report deleted successfully.")));
+                                  setState(() =>
+                                      _filteredReports.removeAt(i));
                                 },
                                 child: Card(
                                   color: Colors.white,
                                   elevation: 2,
-                                  margin:
-                                      const EdgeInsets.symmetric(vertical: 6.0),
+                                  margin: const EdgeInsets.symmetric(
+                                      vertical: 6.0),
                                   shape: RoundedRectangleBorder(
                                       borderRadius:
                                           BorderRadius.circular(12)),
                                   child: ListTile(
-                                    leading: UIHelpers.getStatusIndicator(
-                                        r['diagnosis'], size: 12.0),
+                                    leading:
+                                        UIHelpers.getStatusIndicator(
+                                            r['diagnosis'],
+                                            size: 12.0),
                                     title: Text(
                                       r['name'] ?? 'Unnamed',
                                       style: const TextStyle(
-                                          fontWeight: FontWeight.w600),
+                                          fontWeight:
+                                              FontWeight.w600),
                                     ),
                                     subtitle: Text(
                                         'ID: $pid • ${r['diagnosis'] ?? 'Pending'} • $date'),
@@ -434,18 +472,81 @@ class ReportsPageState extends State<ReportsPage>
                                         if (value == 'edit') {
                                           await _showEditDialogForList(r);
                                         } else if (value == 'delete') {
-                                          await db.deleteRecordById(r['record_id']);
-                                          if (!context.mounted) return; 
-                                          setState(() =>
-                                              _filteredReports.removeAt(i));
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(const SnackBar(
-                                                  content:
-                                                      Text("🗑 Report deleted.")));
+                                          final confirm =
+                                              await showDialog<bool>(
+                                            context: context,
+                                            builder: (context) =>
+                                                AlertDialog(
+                                              title: const Text(
+                                                  "Confirm Delete"),
+                                              content: const Text(
+                                                  "Are you sure you want to delete this report?"),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                          context,
+                                                          false),
+                                                  child: const Text(
+                                                      "Cancel"),
+                                                ),
+                                                ElevatedButton(
+                                                  style: ElevatedButton
+                                                      .styleFrom(
+                                                    backgroundColor:
+                                                        AppColors
+                                                            .primary,
+                                                    foregroundColor:
+                                                        Colors.white,
+                                                    shape:
+                                                        RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius
+                                                              .circular(
+                                                                  8),
+                                                    ),
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                            horizontal:
+                                                                20,
+                                                            vertical:
+                                                                10),
+                                                    textStyle: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight
+                                                                .w600),
+                                                  ),
+                                                  onPressed: () =>
+                                                      Navigator.pop(
+                                                          context,
+                                                          true),
+                                                  child: const Text(
+                                                      "Delete"),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                          if (confirm == true) {
+                                            await db.deleteRecordById(
+                                                r['record_id']);
+                                            if (!context.mounted) {
+                                              return;
+                                            }
+                                            setState(() =>
+                                                _filteredReports
+                                                    .removeAt(i));
+                                            ScaffoldMessenger.of(
+                                                    context)
+                                                .showSnackBar(
+                                                    const SnackBar(
+                                              content: Text(
+                                                  "🗑 Report deleted."),
+                                            ));
+                                          }
                                         }
                                       },
-                                      itemBuilder: (context) => [
-                                        const PopupMenuItem(
+                                      itemBuilder: (context) => const [
+                                        PopupMenuItem(
                                           value: 'edit',
                                           child: Row(children: [
                                             Icon(Icons.edit,
@@ -454,11 +555,12 @@ class ReportsPageState extends State<ReportsPage>
                                             Text('Edit'),
                                           ]),
                                         ),
-                                        const PopupMenuItem(
+                                        PopupMenuItem(
                                           value: 'delete',
                                           child: Row(children: [
                                             Icon(Icons.delete,
-                                                color: AppColors.warning),
+                                                color:
+                                                    AppColors.warning),
                                             SizedBox(width: 8),
                                             Text('Delete'),
                                           ]),
@@ -470,9 +572,12 @@ class ReportsPageState extends State<ReportsPage>
                                         context,
                                         MaterialPageRoute(
                                             builder: (_) =>
-                                                ReportDetailPage(report: r)),
+                                                ReportDetailPage(
+                                                    report: r)),
                                       );
-                                      if (res == true && mounted) load();
+                                      if (res == true && mounted) {
+                                        load();
+                                      }
                                     },
                                   ),
                                 ),

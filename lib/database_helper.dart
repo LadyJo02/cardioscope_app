@@ -30,6 +30,7 @@ class DatabaseHelper {
     );
   }
 
+  // ✅ Cleaned: Removed duplicate CREATE TABLE settings
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
       CREATE TABLE practitioners (
@@ -80,13 +81,6 @@ class DatabaseHelper {
           ON DELETE CASCADE
       );
     ''');
-
-    await db.execute('''
-      CREATE TABLE settings (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      );
-    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -102,7 +96,7 @@ class DatabaseHelper {
       await db.execute("ALTER TABLE patients ADD COLUMN folder_path TEXT;");
     }
 
-    // ensure proper settings table structure
+    // ✅ Only keep this single, safe CREATE IF NOT EXISTS
     final cols = await db.rawQuery("PRAGMA table_info(settings);");
     final colNames = cols.map((c) => c['name'] as String).toList();
 
@@ -197,7 +191,6 @@ class DatabaseHelper {
         where: 'practitioner_id = ?', whereArgs: [practitionerId]);
   }
 
-  // Smart, case-insensitive substring-based search (letter-by-letter)
   Future<List<String>> getPatientSuggestions(String query) async {
     if (query.isEmpty) {
       debugPrint("🟡 Empty query → returning []");
@@ -262,7 +255,6 @@ class DatabaseHelper {
     return db.insert('mitral_valve_analysis', analysis);
   }
 
-  /// Get analysis row by record_id (null if none)
   Future<Map<String, dynamic>?> getAnalysisByRecordId(int recordId) async {
     final db = await database;
     final res = await db.query(
@@ -274,15 +266,15 @@ class DatabaseHelper {
     return res.isNotEmpty ? res.first : null;
   }
 
-  /// Update analysis by record_id (returns affected row count)
-  Future<int> updateAnalysisByRecordId(int recordId, Map<String, dynamic> update) async {
+  Future<int> updateAnalysisByRecordId(
+      int recordId, Map<String, dynamic> update) async {
     final db = await database;
     return db.update('mitral_valve_analysis', update,
         where: 'record_id = ?', whereArgs: [recordId]);
   }
 
-  /// Upsert: update if exists, otherwise insert a new analysis tied to record_id
-  Future<void> upsertAnalysisByRecordId(int recordId, {
+  Future<void> upsertAnalysisByRecordId(
+    int recordId, {
     required String diagnosis,
     required String probabilitiesJson,
     required String analysisDateIso,
@@ -310,7 +302,6 @@ class DatabaseHelper {
     }
   }
 
-  /// Original method used by exports and reports filtering
   Future<List<Map<String, dynamic>>> getAllReports(int practitionerId,
       {DateTime? startDate, DateTime? endDate}) async {
     final db = await database;
@@ -375,14 +366,14 @@ class DatabaseHelper {
     await db.delete('settings', where: 'key = ?', whereArgs: [key]);
   }
 
-  // 🗑️ Delete record and its linked analysis
   Future<void> deleteRecordById(int recordId) async {
     final db = await database;
-    await db.delete('mitral_valve_analysis', where: 'record_id = ?', whereArgs: [recordId]);
-    await db.delete('heart_sound_records', where: 'record_id = ?', whereArgs: [recordId]);
+    await db.delete('mitral_valve_analysis',
+        where: 'record_id = ?', whereArgs: [recordId]);
+    await db.delete('heart_sound_records',
+        where: 'record_id = ?', whereArgs: [recordId]);
     debugPrint("🗑 Deleted record $recordId and related analysis");
   }
-
 
   // ---------------- UTILITIES ----------------
 
