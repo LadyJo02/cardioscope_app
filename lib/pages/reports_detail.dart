@@ -393,10 +393,10 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.surface),
+        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.onPrimary),
         title: Text(
           'Report for ${_localReport['name'] ?? 'Unnamed'}',
-          style: TextStyle(color: Theme.of(context).colorScheme.surface),
+          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
         ),
         actions: [
           PopupMenuButton<String>(
@@ -542,6 +542,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           child: LinearProgressIndicator(
             value: value,
             backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+
             color: UIHelpers.getStatusColor(label),
             minHeight: 12,
             borderRadius: BorderRadius.circular(6),
