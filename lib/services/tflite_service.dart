@@ -1,4 +1,4 @@
-// 📁 lib/services/tflite_service.dart
+// lib/services/tflite_service.dart
 import 'dart:io';
 import 'dart:math';
 

@@ -262,11 +262,52 @@ class DatabaseHelper {
     return db.insert('mitral_valve_analysis', analysis);
   }
 
-  /// Simple update for analysis by record_id (used for reanalysis)
+  /// Get analysis row by record_id (null if none)
+  Future<Map<String, dynamic>?> getAnalysisByRecordId(int recordId) async {
+    final db = await database;
+    final res = await db.query(
+      'mitral_valve_analysis',
+      where: 'record_id = ?',
+      whereArgs: [recordId],
+      limit: 1,
+    );
+    return res.isNotEmpty ? res.first : null;
+  }
+
+  /// Update analysis by record_id (returns affected row count)
   Future<int> updateAnalysisByRecordId(int recordId, Map<String, dynamic> update) async {
     final db = await database;
     return db.update('mitral_valve_analysis', update,
         where: 'record_id = ?', whereArgs: [recordId]);
+  }
+
+  /// Upsert: update if exists, otherwise insert a new analysis tied to record_id
+  Future<void> upsertAnalysisByRecordId(int recordId, {
+    required String diagnosis,
+    required String probabilitiesJson,
+    required String analysisDateIso,
+  }) async {
+    final db = await database;
+    final exists = await getAnalysisByRecordId(recordId);
+    if (exists == null) {
+      await db.insert('mitral_valve_analysis', {
+        'record_id': recordId,
+        'diagnosis': diagnosis,
+        'probabilities': probabilitiesJson,
+        'analysis_date': analysisDateIso,
+      });
+    } else {
+      await db.update(
+        'mitral_valve_analysis',
+        {
+          'diagnosis': diagnosis,
+          'probabilities': probabilitiesJson,
+          'analysis_date': analysisDateIso,
+        },
+        where: 'record_id = ?',
+        whereArgs: [recordId],
+      );
+    }
   }
 
   /// Original method used by exports and reports filtering
@@ -333,6 +374,15 @@ class DatabaseHelper {
     final db = await database;
     await db.delete('settings', where: 'key = ?', whereArgs: [key]);
   }
+
+  // 🗑️ Delete record and its linked analysis
+  Future<void> deleteRecordById(int recordId) async {
+    final db = await database;
+    await db.delete('mitral_valve_analysis', where: 'record_id = ?', whereArgs: [recordId]);
+    await db.delete('heart_sound_records', where: 'record_id = ?', whereArgs: [recordId]);
+    debugPrint("🗑 Deleted record $recordId and related analysis");
+  }
+
 
   // ---------------- UTILITIES ----------------
 

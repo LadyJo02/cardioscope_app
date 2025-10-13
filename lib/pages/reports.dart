@@ -50,7 +50,8 @@ class ReportsPageState extends State<ReportsPage>
     try {
       final prefs = await SharedPreferences.getInstance();
       _practitionerId = prefs.getInt('practitioner_id');
-      _practitionerName = prefs.getString('practitioner_name') ?? "Practitioner";
+      _practitionerName =
+          prefs.getString('practitioner_name') ?? "Practitioner";
 
       if (_practitionerId == null) {
         if (mounted) setState(() => _isLoading = false);
@@ -66,7 +67,6 @@ class ReportsPageState extends State<ReportsPage>
       final patients = await db.getAllPatients(_practitionerId!);
       debugPrint("✅ Fetched ${patients.length} patients.");
 
-      // ✅ FIX: Create a mutable copy of the list before sorting
       final data = List<Map<String, dynamic>>.from(dbData);
 
       // Sort newest first
@@ -89,9 +89,8 @@ class ReportsPageState extends State<ReportsPage>
       debugPrint("🔴 ERROR loading reports: $e");
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error loading reports: $e")),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Error loading reports: $e")));
       }
     }
   }
@@ -100,12 +99,14 @@ class ReportsPageState extends State<ReportsPage>
     setState(() {
       _filteredReports = _reports.where((r) {
         final name = (r['name'] ?? '').toString().toLowerCase();
-        
+
         final matchesSearch =
             _searchQuery.isEmpty || name.contains(_searchQuery.toLowerCase());
-        
+
         final selectedPatientName = _patients
-            .firstWhere((p) => p['name'] == _selectedPatient, orElse: () => {})['name'];
+            .firstWhere((p) => p['name'] == _selectedPatient,
+                orElse: () => {})
+            .putIfAbsent('name', () => null);
 
         final matchesPatient = _selectedPatient == null ||
             _selectedPatient == 'All' ||
@@ -131,13 +132,15 @@ class ReportsPageState extends State<ReportsPage>
         end: DateTime.now(),
       ),
     );
-    if (!mounted || picked == null || _practitionerId == null) return;
+    if (!context.mounted || picked == null || _practitionerId == null) return;
 
     final filtered = await db.getAllReports(
       _practitionerId!,
       startDate: picked.start,
       endDate: picked.end,
     );
+
+    if (!context.mounted) return;
 
     if (filtered.isEmpty) {
       scaffold.showSnackBar(
@@ -179,6 +182,83 @@ class ReportsPageState extends State<ReportsPage>
       if (mounted) Navigator.pop(context);
       scaffold.showSnackBar(SnackBar(content: Text("Export error: $e")));
     }
+  }
+
+  Future<void> _showEditDialogForList(Map<String, dynamic> report) async {
+    final nameCtrl = TextEditingController(text: report['name'] ?? '');
+    final genderCtrl = TextEditingController(text: report['gender'] ?? '');
+    final birthdayCtrl = TextEditingController(text: report['birthday'] ?? '');
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Edit Patient Info"),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: "Name")),
+            const SizedBox(height: 8),
+            TextField(controller: genderCtrl, decoration: const InputDecoration(labelText: "Gender")),
+            const SizedBox(height: 8),
+            TextField(
+              controller: birthdayCtrl,
+              readOnly: true,
+              decoration: const InputDecoration(
+                labelText: "Birthday",
+                suffixIcon: Icon(Icons.calendar_today),
+              ),
+              onTap: () async {
+                DateTime? picked = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime.tryParse(birthdayCtrl.text) ?? DateTime(2000),
+                  firstDate: DateTime(1900),
+                  lastDate: DateTime.now(),
+                );
+                if (picked != null) {
+                  birthdayCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
+                }
+              },
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            child: const Text("Save"),
+            onPressed: () async {
+              final patientId = report['patient_id'] as int?;
+              if (patientId != null) {
+                await db.database.then((conn) {
+                  conn.update(
+                    'patients',
+                    {
+                      'name': nameCtrl.text.trim(),
+                      'gender': genderCtrl.text.trim(),
+                      'birthday': birthdayCtrl.text.trim(),
+                    },
+                    where: 'patient_id = ?',
+                    whereArgs: [patientId],
+                  );
+                });
+                if (!context.mounted) return; 
+
+                setState(() {
+                  report['name'] = nameCtrl.text.trim();
+                  report['gender'] = genderCtrl.text.trim();
+                  report['birthday'] = birthdayCtrl.text.trim();
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("✅ Patient info updated.")),
+                );
+                Navigator.pop(context);
+              }
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -283,32 +363,118 @@ class ReportsPageState extends State<ReportsPage>
                                 }
                               } catch (_) {}
 
-                              return Card(
-                                color: Colors.white,
-                                elevation: 2,
-                                margin:
-                                    const EdgeInsets.symmetric(vertical: 6.0),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12)),
-                                child: ListTile(
-                                  leading: UIHelpers.getStatusIndicator(
-                                      r['diagnosis'], size: 12.0),
-                                  title: Text(
-                                    r['name'] ?? 'Unnamed',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600),
+                              return Dismissible(
+                                key: Key(r['record_id'].toString()),
+                                direction: DismissDirection.endToStart,
+                                background: Container(
+                                  color: AppColors.warning,
+                                  alignment: Alignment.centerRight,
+                                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                                  child: const Icon(Icons.delete, color: Colors.white),
+                                ),
+                                confirmDismiss: (_) async {
+                                  return await showDialog<bool>(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text("Confirm Delete"),
+                                    content: const Text("Are you sure you want to delete this report?"),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context, false),
+                                        child: const Text("Cancel"),
+                                      ),
+                                      // ⬇️ Replace your old button with this fixed version:
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: AppColors.primary,
+                                          foregroundColor: Colors.white,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            ),
+                                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                          textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                                        ),
+                                        onPressed: () => Navigator.pop(context, true),
+                                        child: const Text("Delete"),
+                                      ),
+                                    ],
                                   ),
-                                  subtitle: Text(
-                                      'ID: $pid • ${r['diagnosis'] ?? 'Pending'} • $date'),
-                                  onTap: () async {
-                                    final res = await Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          builder: (_) =>
-                                              ReportDetailPage(report: r)),
-                                    );
-                                    if (res == true && mounted) load();
-                                  },
+                                  ) ?? false;
+                                },
+
+                                onDismissed: (_) async {
+                                  await db.deleteRecordById(r['record_id']);
+                                  if (!context.mounted) return; 
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text("Report deleted.")),
+                                  );
+                                  setState(() => _filteredReports.removeAt(i));
+                                },
+                                child: Card(
+                                  color: Colors.white,
+                                  elevation: 2,
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 6.0),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(12)),
+                                  child: ListTile(
+                                    leading: UIHelpers.getStatusIndicator(
+                                        r['diagnosis'], size: 12.0),
+                                    title: Text(
+                                      r['name'] ?? 'Unnamed',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w600),
+                                    ),
+                                    subtitle: Text(
+                                        'ID: $pid • ${r['diagnosis'] ?? 'Pending'} • $date'),
+                                    trailing: PopupMenuButton<String>(
+                                      onSelected: (value) async {
+                                        if (value == 'edit') {
+                                          await _showEditDialogForList(r);
+                                        } else if (value == 'delete') {
+                                          await db.deleteRecordById(r['record_id']);
+                                          if (!context.mounted) return; 
+                                          setState(() =>
+                                              _filteredReports.removeAt(i));
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(const SnackBar(
+                                                  content:
+                                                      Text("🗑 Report deleted.")));
+                                        }
+                                      },
+                                      itemBuilder: (context) => [
+                                        const PopupMenuItem(
+                                          value: 'edit',
+                                          child: Row(children: [
+                                            Icon(Icons.edit,
+                                                color: AppColors.deep),
+                                            SizedBox(width: 8),
+                                            Text('Edit'),
+                                          ]),
+                                        ),
+                                        const PopupMenuItem(
+                                          value: 'delete',
+                                          child: Row(children: [
+                                            Icon(Icons.delete,
+                                                color: AppColors.warning),
+                                            SizedBox(width: 8),
+                                            Text('Delete'),
+                                          ]),
+                                        ),
+                                      ],
+                                    ),
+                                    onTap: () async {
+                                      final res = await Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                            builder: (_) =>
+                                                ReportDetailPage(report: r)),
+                                      );
+                                      if (res == true && mounted) load();
+                                    },
+                                  ),
                                 ),
                               );
                             },

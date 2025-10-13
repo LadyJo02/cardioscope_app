@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart' show themeNotifier;
 import 'faq_page.dart';
-import 'login.dart'; // ✅ use login instead of profile setup
+import 'login.dart';
 import 'quick_start_guide.dart';
 
 class SettingsPage extends StatefulWidget {
