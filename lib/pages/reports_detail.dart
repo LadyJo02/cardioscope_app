@@ -45,6 +45,9 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     _initializeState();
     _loadPractitionerName();
 
+    // 🕐 Delay refresh slightly so patient_id is fully loaded
+    Future.delayed(const Duration(milliseconds: 200), _refreshPatientDetails);
+
     final path = _localReport['file_path'] as String?;
     if (path != null && File(path).existsSync()) {
       _player.setFilePath(path).catchError((e) {
@@ -79,6 +82,46 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       }
     }
   }
+
+// ✅ Fetch updated patient info (especially symptoms, gender, birthday)
+Future<void> _refreshPatientDetails() async {
+  try {
+    final db = DatabaseHelper.instance;
+    final patientIdRaw = _localReport['patient_id'];
+    if (patientIdRaw == null) {
+      debugPrint("⚠️ _refreshPatientDetails: patient_id is null");
+      return;
+    }
+
+    // Convert to int safely
+    final int? patientId = patientIdRaw is int
+        ? patientIdRaw
+        : int.tryParse(patientIdRaw.toString());
+
+    if (patientId == null) {
+      debugPrint("⚠️ _refreshPatientDetails: patient_id invalid → $patientIdRaw");
+      return;
+    }
+
+    final patient = await db.getPatientById(patientId);
+    if (patient != null && mounted) {
+      setState(() {
+        _localReport['name'] = patient['name'] ?? _localReport['name'];
+        _localReport['birthday'] = patient['birthday'] ?? _localReport['birthday'];
+        _localReport['gender'] = patient['gender'] ?? _localReport['gender'];
+        _localReport['age'] = patient['age'] ?? _localReport['age'];
+        _localReport['symptoms'] = patient['symptoms'] ?? _localReport['symptoms'];
+      });
+      debugPrint("🔄 Refreshed patient details for ID $patientId → ${patient['symptoms']}");
+    } else {
+      debugPrint("⚠️ No patient found with ID $patientId");
+    }
+  } catch (e) {
+    debugPrint("❌ Error refreshing patient details: $e");
+  }
+}
+
+
 
   @override
   void dispose() {
@@ -205,6 +248,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     final genderCtrl = TextEditingController(text: _localReport['gender'] ?? '');
     final birthdayCtrl =
         TextEditingController(text: _localReport['birthday'] ?? '');
+    final symptomsCtrl = TextEditingController(text: _localReport['symptoms'] ?? '');
 
     await showDialog(
       context: context,
@@ -241,8 +285,15 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                 }
               },
             ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: symptomsCtrl,
+              decoration: const InputDecoration(labelText: "Symptoms"),
+              maxLines: 2,
+            ),
           ]),
         ),
+
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -251,7 +302,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
-              foregroundColor: Theme.of(context).colorScheme.surface,
+              foregroundColor: Theme.of(context).cardColor,
             ),
             child: const Text("Save"),
             onPressed: () async {
@@ -264,6 +315,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                       'name': nameCtrl.text.trim(),
                       'gender': genderCtrl.text.trim(),
                       'birthday': birthdayCtrl.text.trim(),
+                      'symptoms': symptomsCtrl.text.trim(),
                     },
                     where: 'patient_id = ?',
                     whereArgs: [patientId],
@@ -275,6 +327,8 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                 updated['name'] = nameCtrl.text.trim();
                 updated['gender'] = genderCtrl.text.trim();
                 updated['birthday'] = birthdayCtrl.text.trim();
+                updated['symptoms'] = symptomsCtrl.text.trim();
+
 
                 setState(() {
                   _localReport = updated;
@@ -309,7 +363,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
-              foregroundColor: Theme.of(context).colorScheme.surface,
+              foregroundColor: Theme.of(context).cardColor,
             ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text("Delete"),
@@ -344,7 +398,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                foregroundColor: Theme.of(context).colorScheme.surface,
+                foregroundColor: Theme.of(context).cardColor,
               ),
               child: const Text("Generate Now"),
               onPressed: () {
@@ -365,6 +419,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
         'birthday': _localReport['birthday'],
         'age': _localReport['age'],
         'gender': _localReport['gender'],
+        'symptoms': _localReport['symptoms'] ?? '-',
         'file_path': _localReport['file_path'],
         'record_date': _localReport['record_date'],
         'diagnosis': _currentDiagnosis,
@@ -453,18 +508,26 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppColors.primary,
-        icon: Icon(Icons.picture_as_pdf, color: Theme.of(context).colorScheme.surface),
-        label:
-            Text("Export PDF", style: TextStyle(color: Theme.of(context).colorScheme.surface)),
         onPressed: _handleExportPdf,
-      ),
-    );
-  }
+        backgroundColor: AppColors.primary,
+        icon: Icon(
+          Icons.picture_as_pdf,
+          color: Theme.of(context).colorScheme.onPrimary, 
+        ),
+        label:Text(
+          "Export PDF",
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onPrimary, // adaptive text color
+            fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
+    }
 
   Widget _buildDetailSection(String patientIdFormatted, String dateString) {
     return Card(
-      color: Theme.of(context).colorScheme.surface,
+      color: Theme.of(context).cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -482,6 +545,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           _buildRow('Birthday:', _localReport['birthday'] ?? 'N/A'),
           _buildRow('Age:', _localReport['age']?.toString() ?? 'N/A'),
           _buildRow('Gender:', _localReport['gender'] ?? 'N/A'),
+          _buildRow('Symptoms:', _localReport['symptoms'] ?? 'N/A'),
           _buildRow('File:', (_localReport['file_path'] ?? '').split('/').last),
           _buildRow('Recorded:', dateString),
         ]),
@@ -489,42 +553,71 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     );
   }
 
-  Widget _buildRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(children: [
+Widget _buildRow(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6.0),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "$label ",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Theme.of(context).brightness == Brightness.dark
+              ? Colors.white70
+              : Colors.black87,
+          ),
+        ),
         Expanded(
-            child: Text(label,
-                style: TextStyle(
-                    fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.7)))),
-        Expanded(child: Text(value, textAlign: TextAlign.end)),
-      ]),
-    );
-  }
-
+          child: SelectableText(value, textAlign: TextAlign.end),
+        ),
+      ],
+    ),
+  );
+}
   Widget _buildAnalysisSection() {
     return Card(
-      color: Theme.of(context).colorScheme.surface,
+      color: Theme.of(context).cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child:
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text("AI Analysis",
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.bold)),
-          const Divider(height: 20),
-          _buildRow('Classification:', _currentDiagnosis),
-          const SizedBox(height: 10),
-          if (_currentProbabilities.isNotEmpty)
-            ..._currentProbabilities.entries
-                .map((entry) => _buildProbabilityRow(entry.key, entry.value))
-          else
-            const Text("No probabilities available.")
-        ]),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("AI Analysis",
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const Divider(height: 20),
+
+            // 🩺 Classification
+            _buildRow('Classification:', _currentDiagnosis),
+            const SizedBox(height: 10),
+
+            // 🧠 Detailed Breakdown heading
+            Text(
+              "Detailed Breakdown:",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // 📊 Probabilities visualization
+            if (_currentProbabilities.isNotEmpty)
+              ..._currentProbabilities.entries
+                  .map((entry) => _buildProbabilityRow(entry.key, entry.value))
+                  
+            else
+              Text(
+                "No probabilities available.",
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -535,8 +628,16 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       child: Row(children: [
         Expanded(
             flex: 2,
-            child: Text(label,
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7)))),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white70
+                    : Colors.grey.shade700,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
         Expanded(
           flex: 5,
           child: LinearProgressIndicator(
@@ -558,7 +659,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
   Widget _buildSpectrogramSection() {
     return Card(
-      color: Theme.of(context).colorScheme.surface,
+      color: Theme.of(context).cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -590,7 +691,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
-                    foregroundColor: Theme.of(context).colorScheme.surface),
+                    foregroundColor: Theme.of(context).cardColor),
                 onPressed: _generateMelIfNeeded,
                 child: const Text('Generate Spectrogram'),
               ),
@@ -602,7 +703,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
   Widget _buildWaveformSection() {
     return Card(
-      color: Theme.of(context).colorScheme.surface,
+      color: Theme.of(context).cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(

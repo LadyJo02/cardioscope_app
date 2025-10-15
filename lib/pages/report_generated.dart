@@ -19,6 +19,7 @@ class ReportGeneratedPage extends StatefulWidget {
   final String patientName;
   final dynamic patientAge;
   final String patientGender;
+  final String? symptoms;
   final String filePath;
   final DateTime recordedDate;
   final String classification;
@@ -38,6 +39,7 @@ class ReportGeneratedPage extends StatefulWidget {
     required this.probabilities,
     this.patientBirthday,
     this.melPngBytes,
+    this.symptoms,
   });
 
   @override
@@ -125,10 +127,10 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text("Analysis for ${widget.patientName}",
-            style: const TextStyle(color: Colors.white)),
+            style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
         backgroundColor: AppColors.primary,
         leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
+          icon: Icon(Icons.close, color: Theme.of(context).colorScheme.surface),
           onPressed: () => Navigator.of(context).pop(true),
         ),
       ),
@@ -156,6 +158,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
               _buildDetailRow("Birthday:", birthdayDisplay),
               _buildDetailRow("Age:", widget.patientAge.toString()),
               _buildDetailRow("Gender:", widget.patientGender),
+              _buildDetailRow("Symptoms:", widget.symptoms ?? "-"),
               _buildDetailRow("File:", widget.filePath.split('/').last),
               _buildDetailRow("Recorded:",
                   DateFormat('MMMM d, yyyy HH:mm').format(widget.recordedDate)),
@@ -170,13 +173,13 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _buildDetailRow("Classification:", widget.classification),
               const SizedBox(height: 10),
-              const Text("Detailed Breakdown:",
+              Text("Detailed Breakdown:",
                   style: TextStyle(
-                      fontWeight: FontWeight.bold, color: Colors.black54)),
+                      fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
               const SizedBox(height: 8),
               if (widget.probabilities.isEmpty)
-                const Text("No probabilities available",
-                    style: TextStyle(color: Colors.black54))
+                Text("No probabilities available",
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface))
               else
                 ...widget.probabilities.entries.map((entry) {
                   return _buildProbabilityRow(
@@ -190,14 +193,22 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           _buildCard(
             title: 'Model Input (Mel-Spectrogram)',
             child: widget.melPngBytes != null
-                ? ClipRRect(
+                ? Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFF1E1E1E)
+                        : const Color(0xFFF0F0F0),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: Image.memory(
                     widget.melPngBytes!,
                     width: double.infinity,
-                    fit: BoxFit.cover, // 🔹 stretch width but keep proportions
+                    fit: BoxFit.contain, // 🔹 stretch width but keep proportions
                   ),
                 )
+              )
                 : const Center(
                     child: Padding(
                       padding: EdgeInsets.symmetric(vertical: 24.0),
@@ -262,6 +273,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
               'birthday': widget.patientBirthday ?? '',
               'age': widget.patientAge,
               'gender': widget.patientGender,
+              'symptoms': widget.symptoms ?? '-',
               'file_path': widget.filePath,
               'record_date': widget.recordedDate.toIso8601String(),
               'diagnosis': widget.classification,
@@ -271,10 +283,18 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
             practitionerName: _practitionerName,
           );
         },
-        icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
-        label:
-            const Text("Export PDF", style: TextStyle(color: Colors.white)),
         backgroundColor: AppColors.primary,
+        icon: Icon(
+          Icons.picture_as_pdf,
+          color: Theme.of(context).colorScheme.onPrimary, // ✅ match reports_detail.dart
+        ),
+        label: Text(
+          "Export PDF",
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onPrimary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
@@ -373,7 +393,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           flex: 5,
           child: LinearProgressIndicator(
             value: value,
-            backgroundColor: Colors.grey.shade300,
+            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
             color: UIHelpers.getStatusColor(label),
             minHeight: 12,
             borderRadius: BorderRadius.circular(6),
@@ -394,8 +414,8 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text("$label ",
-            style: const TextStyle(
-                fontWeight: FontWeight.bold, color: Colors.black54)),
+            style: TextStyle(
+                fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
         Expanded(
             child: isSelectable
                 ? SelectableText(value, textAlign: TextAlign.end)

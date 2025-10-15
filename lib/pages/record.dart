@@ -304,6 +304,7 @@ class _RecordPageState extends State<RecordPage> {
             classification: aiResult?['label'] ?? 'Error',
             probabilities: aiResult?['probabilities'] as Map<String, dynamic>? ?? {},
             patientBirthday: patient?['birthday']?.toString(),
+            symptoms: patient?['symptoms']?.toString(),
             melPngBytes: melPng,
           ),
         ),
@@ -315,33 +316,57 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
-  Future<Map<String, dynamic>?> _showPatientDialog({bool switchMode = false}) async {
-    return await showGeneralDialog<Map<String, dynamic>>(
-      context: context,
-      barrierDismissible: switchMode,
-      barrierLabel: switchMode ? 'Switch Patient' : 'Patient Info',
-      transitionDuration: const Duration(milliseconds: 250),
-      pageBuilder: (_, __, ___) => PatientFormDialog(isSwitchMode: switchMode),
-      transitionBuilder: (_, anim, __, child) => FadeTransition(
-        opacity: anim,
-        child: SlideTransition(
-          position: Tween(begin: const Offset(0, 0.1), end: Offset.zero).animate(anim),
-          child: child,
-        ),
+  // ✅ Updated _showPatientDialog — allows editing symptoms before recording
+Future<Map<String, dynamic>?> _showPatientDialog({bool switchMode = false}) async {
+  final result = await showGeneralDialog<Map<String, dynamic>>(
+    context: context,
+    barrierDismissible: switchMode,
+    barrierLabel: switchMode ? 'Switch Patient' : 'Patient Info',
+    transitionDuration: const Duration(milliseconds: 250),
+    pageBuilder: (_, __, ___) => PatientFormDialog(isSwitchMode: switchMode),
+    transitionBuilder: (_, anim, __, child) => FadeTransition(
+      opacity: anim,
+      child: SlideTransition(
+        position: Tween(begin: const Offset(0, 0.1), end: Offset.zero).animate(anim),
+        child: child,
       ),
-    );
+    ),
+  );
+
+  if (result != null) {
+    // ✅ Immediately update _currentPatient and persist symptoms to DB
+    final db = DatabaseHelper.instance;
+    final patientId = result['patient_id'];
+    await db.database.then((conn) {
+      conn.update(
+        'patients',
+        {'symptoms': result['symptoms'] ?? ''},
+        where: 'patient_id = ?',
+        whereArgs: [patientId],
+      );
+    });
+
+    // 🔄 Refresh current patient info in the UI
+    await _loadCurrentPatient();
   }
+
+  return result;
+}
+
 
   Future<void> _switchPatient() async {
     final result = await _showPatientDialog(switchMode: true);
     if (result != null) {
       if (!mounted) return;
-      setState(() => _currentPatient = result);
+      
+      final fresh = await db.getPatientById(result['patient_id']);
+      setState(() => _currentPatient = fresh ?? result);
+      
       await storage.setCurrentPatient(result['patient_id']);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Switched to patient: ${result['name']}')));
+          .showSnackBar(SnackBar(content: Text('Updated and Switched to patient: ${result['name']}')));
     }
   }
 
@@ -413,9 +438,15 @@ class _RecordPageState extends State<RecordPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Record Heart Sound', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
         backgroundColor: AppColors.primary,
-        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.onSurface),
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+        title: Text(
+          'Record Heart Sound',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onPrimary, // ✅ consistent white text
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
       body: Padding(
         padding: const EdgeInsets.symmetric(vertical: 16.0),
@@ -438,11 +469,10 @@ class _RecordPageState extends State<RecordPage> {
                     width: ButtonConstants.micButtonSize,
                     height: ButtonConstants.micButtonSize,
                     decoration: BoxDecoration(
-                      color: _isRecording ? Theme.of(context).colorScheme.onSurface : AppColors.primary,
+                      color: _isRecording 
+                          ? AppColors.primary
+                          :Theme.of(context).colorScheme.primary,
                       shape: BoxShape.circle,
-                      border: _isRecording
-                          ? Border.all(color: AppColors.primary, width: 4)
-                          : null,
                       boxShadow: [
                         BoxShadow(
                           color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.15),
@@ -515,6 +545,9 @@ class _RecordPageState extends State<RecordPage> {
     final name = _currentPatient?['name'];
     final hasPatient = name != null && name.isNotEmpty;
     final isDisabled = _isRecording || _isProcessing;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final symptoms = _currentPatient?['symptoms']?.toString() ?? '';
 
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 300),
@@ -525,7 +558,10 @@ class _RecordPageState extends State<RecordPage> {
           margin: const EdgeInsets.symmetric(horizontal: 12.0),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.onSurface,
+            color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+            border: Border.all(
+              color: Theme.of(context).dividerColor.withValues(alpha: 0.4),
+            ),
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
@@ -534,38 +570,64 @@ class _RecordPageState extends State<RecordPage> {
                 offset: const Offset(0, 3),
               )
             ],
-            border: Border.all(color: Theme.of(context).colorScheme.onSurface),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(children: [
-                const Icon(Icons.person, color: AppColors.primary),
-                const SizedBox(width: 8),
-                Text(
-                  hasPatient ? name : "No patient selected",
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                    color: hasPatient ? Theme.of(context).colorScheme.onSurface : Theme.of(context).colorScheme.onSurface,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(children: [
+                    const Icon(Icons.person, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      hasPatient ? name : "No patient selected",
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                  ]),
+                  TextButton.icon(
+                    onPressed: isDisabled ? null : _switchPatient,
+                    icon: Icon(
+                      Icons.swap_horiz_rounded,
+                      color: isDisabled
+                          ? Theme.of(context).colorScheme.onSurface
+                          : AppColors.primary,
+                    ),
+                    label: Text(
+                      hasPatient ? "Switch" : "Add",
+                      style: TextStyle(
+                        color: isDisabled
+                            ? Theme.of(context).colorScheme.onSurface
+                            : AppColors.primary,
+                      ),
+                    ),
                   ),
-                ),
-              ]),
-              TextButton.icon(
-                onPressed: isDisabled ? null : _switchPatient,
-                icon: Icon(Icons.swap_horiz_rounded,
-                    color: isDisabled ? Theme.of(context).colorScheme.onSurface : AppColors.primary),
-                label: Text(
-                  hasPatient ? "Switch" : "Add",
-                  style: TextStyle(color: isDisabled ? Theme.of(context).colorScheme.onSurface : AppColors.primary),
+                ],
+              ),
+              if (symptoms.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  "Symptoms: $symptoms",
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+            ),
+        );
+      }
+
 
   Widget _buildGuidelinesView() {
     return Padding(
@@ -606,7 +668,7 @@ class _RecordPageState extends State<RecordPage> {
             margin: const EdgeInsets.symmetric(horizontal: 24.0),
             padding: const EdgeInsets.symmetric(vertical: 8.0),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.onSurface,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(

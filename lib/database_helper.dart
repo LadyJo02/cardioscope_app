@@ -8,7 +8,7 @@ import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
   static const _databaseName = "cardioscope.db";
-  static const _databaseVersion = 5; // bump when schema changes
+  static const _databaseVersion = 6; // bump when schema changes
 
   DatabaseHelper._privateConstructor();
   static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
@@ -94,6 +94,10 @@ class DatabaseHelper {
     if (oldVersion < 3) {
       await db.execute("ALTER TABLE patients ADD COLUMN birthday TEXT;");
       await db.execute("ALTER TABLE patients ADD COLUMN folder_path TEXT;");
+    }
+
+    if (oldVersion < 6) { // bump version when migrating
+      await db.execute("ALTER TABLE patients ADD COLUMN symptoms TEXT;");
     }
 
     // ✅ Only keep this single, safe CREATE IF NOT EXISTS

@@ -275,8 +275,9 @@ class ReportsPageState extends State<ReportsPage>
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        title: const Text('Reports', style: TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+        title: const Text('Reports'),
+        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.onPrimary),
         actions: [
           IconButton(
             icon: const Icon(Icons.ios_share),
@@ -380,8 +381,8 @@ class ReportsPageState extends State<ReportsPage>
                                   alignment: Alignment.centerRight,
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 20),
-                                  child: const Icon(Icons.delete,
-                                      color: Colors.white),
+                                  child: Icon(Icons.delete,
+                                      color: Theme.of(context).colorScheme.onSurface),
                                 ),
                                 confirmDismiss: (_) async {
                                   return await showDialog<bool>(
@@ -405,7 +406,7 @@ class ReportsPageState extends State<ReportsPage>
                                                 backgroundColor:
                                                     AppColors.primary,
                                                 foregroundColor:
-                                                    Colors.white,
+                                                    Theme.of(context).colorScheme.onSurface,
                                                 shape:
                                                     RoundedRectangleBorder(
                                                   borderRadius:
@@ -447,7 +448,7 @@ class ReportsPageState extends State<ReportsPage>
                                       _filteredReports.removeAt(i));
                                 },
                                 child: Card(
-                                  color: Colors.white,
+                                  color: Theme.of(context).cardColor,
                                   elevation: 2,
                                   margin: const EdgeInsets.symmetric(
                                       vertical: 6.0),
@@ -497,7 +498,7 @@ class ReportsPageState extends State<ReportsPage>
                                                         AppColors
                                                             .primary,
                                                     foregroundColor:
-                                                        Colors.white,
+                                                        Theme.of(context).colorScheme.onSurface,
                                                     shape:
                                                         RoundedRectangleBorder(
                                                       borderRadius:

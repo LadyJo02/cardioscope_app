@@ -1,3 +1,4 @@
+//lib\widgets\patient_form_dialog.dart
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
@@ -20,6 +21,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _birthdayController = TextEditingController();
+  final _symptomsController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
 
   DateTime? _selectedDate;
@@ -34,6 +36,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
   void dispose() {
     _nameController.dispose();
     _birthdayController.dispose();
+    _symptomsController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -106,23 +109,39 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
       'birthday': birthday,
       'age': age,
       'gender': gender,
+      'symptoms': _symptomsController.text.trim(),
       'folder_path': patientFolder,
     };
 
-    final patientId = await db.findOrCreatePatient(practitionerId, patientData);
+    // ✅ If patient exists, update their info — including symptoms
+    final existing = await db.getPatientDetails(name);
+    late int patientId;
+    if (existing != null) {
+      await db.database.then((conn) {
+        conn.update(
+          'patients',
+          patientData,
+          where: 'patient_id = ?',
+          whereArgs: [existing['patient_id']],
+        );
+      });
+      patientId = existing['patient_id'];
+    } else {
+      patientId = await db.findOrCreatePatient(practitionerId, patientData);
+    }
+
     await db.updatePatientFolderPath(patientId, patientFolder);
     await storage.setCurrentPatient(patientId);
 
     if (!mounted) return;
     Navigator.of(context).pop({
       'patient_id': patientId,
-      'name': name,
-      'birthday': birthday,
-      'age': age,
-      'gender': gender,
-      'folder_path': patientFolder,
+      ...patientData,
+
     });
   }
+
+    
 
   @override
   Widget build(BuildContext context) {
@@ -203,6 +222,8 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
                         if (parsed != null) {
                           _selectedDate = parsed;
                           _calculatedAge = _calculateAge(parsed);
+                      _symptomsController.text = data['symptoms'] ?? '';
+                          
                         }
                       }
                     });
@@ -288,10 +309,23 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
                 validator: (val) =>
                     val == null ? 'Please select gender' : null,
               ),
+
+              const SizedBox(height: 12),
+              
+              TextFormField(
+                controller: _symptomsController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Symptoms',
+                  hintText: 'e.g., shortness of breath, chest pain, palpitations',
+                ),
+              ),
             ],
           ),
         ),
       ),
+
+
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),

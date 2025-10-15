@@ -1,4 +1,3 @@
-// lib/pages/dashboard.dart
 import 'package:cardioscope_app/database_helper.dart';
 import 'package:cardioscope_app/pages/reports_detail.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
@@ -20,13 +19,11 @@ class _DashboardPageState extends State<DashboardPage>
   final db = DatabaseHelper.instance;
   List<Map<String, dynamic>> allReports = [];
 
-  // State variables
   String greeting = "Good day";
   String practitionerName = "Health Practitioner";
   int totalPatients = 0;
   int totalThisWeek = 0;
 
-  // Insights panel
   int todayCount = 0;
   int todayMRCount = 0;
   int todayMSCount = 0;
@@ -52,7 +49,8 @@ class _DashboardPageState extends State<DashboardPage>
     }
 
     final prefs = await SharedPreferences.getInstance();
-    practitionerName = prefs.getString('practitioner_name') ?? "Health Practitioner";
+    practitionerName =
+        prefs.getString('practitioner_name') ?? "Health Practitioner";
 
     if (mounted) setState(() {});
   }
@@ -81,7 +79,6 @@ class _DashboardPageState extends State<DashboardPage>
       }
     }).length;
 
-    // Today’s insights (basic counts)
     todayCount = data.where((r) {
       final raw = r['analysis_date'] ?? r['record_date'];
       if (raw is String) {
@@ -112,18 +109,18 @@ class _DashboardPageState extends State<DashboardPage>
 
     return VisibilityDetector(
       key: const Key('dashboard_detector'),
-      onVisibilityChanged: (visibilityInfo) {
-        if (visibilityInfo.visibleFraction > 0.5) {
-          _loadData();
-        }
+      onVisibilityChanged: (info) {
+        if (info.visibleFraction > 0.5) _loadData();
       },
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: AppColors.primary,
-          title: const Text('Dashboard', style: TextStyle(color: Colors.white)),
+          foregroundColor: Theme.of(context).colorScheme.onPrimary,
+          title: const Text('Dashboard'),
           actions: [
             IconButton(
-              icon: const Icon(Icons.settings, color: Colors.white),
+              icon: Icon(Icons.settings,
+                  color: Theme.of(context).colorScheme.onPrimary),
               onPressed: () => Navigator.pushNamed(context, '/settings'),
             ),
           ],
@@ -149,21 +146,18 @@ class _DashboardPageState extends State<DashboardPage>
                 _buildRecentPatientsHeader(),
                 const SizedBox(height: 8),
                 if (recentPatients.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
-                    child: Center(
-                      child: Text('No recent patient screenings.',
-                          style: TextStyle(color: Colors.black54)),
-                    ),
-                  )
+                  _placeholderCard(
+                      Icons.inbox_rounded, 'No recent patient screenings.')
                 else
                   ...recentPatients.map((p) => _buildPatientTile(p)),
                 const SizedBox(height: 24),
-                Text("Today's Insights",
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700)),
+                Text(
+                  "Today's Insights",
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -190,10 +184,43 @@ class _DashboardPageState extends State<DashboardPage>
 
   // --- Helper Widgets ---
 
+  Widget _placeholderCard(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Card(
+        color: Theme.of(context).cardColor,
+        elevation: 8,
+        shadowColor: Theme.of(context).shadowColor.withValues(alpha: 0.25),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  color: AppColors.muted.withValues(alpha: 0.8), size: 40),
+              const SizedBox(height: 10),
+              Text(
+                text,
+                style: TextStyle(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.8),
+                    fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildGreetingCard() {
     return Card(
-      color: Colors.white,
-      elevation: 2,
+      color: Theme.of(context).cardColor,
+      elevation: 8,
+      shadowColor: Theme.of(context).shadowColor.withValues(alpha: 0.25),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
@@ -209,27 +236,34 @@ class _DashboardPageState extends State<DashboardPage>
                 children: [
                   TextSpan(
                       text: '$greeting, ',
-                      style: const TextStyle(color: Colors.black87)),
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface)),
                   TextSpan(
                       text: practitionerName,
                       style: const TextStyle(
                           color: AppColors.primary,
                           fontWeight: FontWeight.bold)),
-                  const TextSpan(
-                      text: '!', style: TextStyle(color: Colors.black87)),
+                  TextSpan(
+                      text: '!',
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface)),
                 ],
               ),
             ),
             const SizedBox(height: 6),
             Text(
               DateFormat('MMMM d, yyyy – HH:mm').format(DateTime.now()),
-              style: const TextStyle(fontSize: 14, color: Colors.black54),
+              style: TextStyle(
+                  fontSize: 14,
+                  color: Theme.of(context).colorScheme.onSurface),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'AI-powered assistant for heart sound analysis. Quick screening and easy patient report management.',
-              style:
-                  TextStyle(fontSize: 14, color: Colors.black54, height: 1.4),
+              style: TextStyle(
+                  fontSize: 14,
+                  color: Theme.of(context).colorScheme.onSurface,
+                  height: 1.4),
             ),
           ],
         ),
@@ -240,8 +274,9 @@ class _DashboardPageState extends State<DashboardPage>
   Widget _statCard(String label, int value, IconData icon, Color color) {
     return Expanded(
       child: Card(
-        color: Colors.white,
-        elevation: 3,
+        color: Theme.of(context).cardColor,
+        elevation: 8,
+        shadowColor: Theme.of(context).shadowColor.withValues(alpha: 0.25),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
@@ -249,16 +284,19 @@ class _DashboardPageState extends State<DashboardPage>
             Icon(icon, color: color, size: 28),
             const SizedBox(height: 8),
             Text('$value',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: Colors.black87)),
+                    color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 4),
             Text(label,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 13,
-                    color: Colors.black54,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withValues(alpha: 0.7),
                     fontWeight: FontWeight.w500)),
           ]),
         ),
@@ -277,8 +315,8 @@ class _DashboardPageState extends State<DashboardPage>
                 ?.copyWith(fontWeight: FontWeight.w700)),
         if (allReports.length > 3)
           GestureDetector(
-            onTap: () => Navigator.pushNamed(context, '/reports')
-                .then((_) => _loadData()),
+            onTap: () =>
+                Navigator.pushNamed(context, '/reports').then((_) => _loadData()),
             child: const Text('View All',
                 style: TextStyle(
                     color: AppColors.primary, fontWeight: FontWeight.bold)),
@@ -302,8 +340,9 @@ class _DashboardPageState extends State<DashboardPage>
         id != null ? DatabaseHelper.instance.formatPatientId(id as int) : 'N/A';
 
     return Card(
-      color: Colors.white,
-      elevation: 2,
+      color: Theme.of(context).cardColor,
+      elevation: 8,
+      shadowColor: Theme.of(context).shadowColor.withValues(alpha: 0.25),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: ListTile(
@@ -326,8 +365,9 @@ class _DashboardPageState extends State<DashboardPage>
   Widget _insightCard(String title, String value, Color color) {
     return Expanded(
       child: Card(
-        color: Colors.white,
-        elevation: 2,
+        color: Theme.of(context).cardColor,
+        elevation: 8,
+        shadowColor: Theme.of(context).shadowColor.withValues(alpha: 0.25),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
@@ -338,7 +378,9 @@ class _DashboardPageState extends State<DashboardPage>
             const SizedBox(height: 4),
             Text(title,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurface)),
           ]),
         ),
       ),

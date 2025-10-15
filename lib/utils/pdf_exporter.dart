@@ -194,18 +194,19 @@ class PdfExporter {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.SizedBox(height: 10),
+        pw.SizedBox(height: 6),
         _buildSectionHeader("Patient Details"),
         _buildDetailRow("Patient ID:", patientId),
         _buildDetailRow("Name:", report['name'] ?? 'N/A'),
         _buildDetailRow("Birthday:", birthdayStr),
         _buildDetailRow("Age:", report['age']?.toString() ?? 'N/A'),
         _buildDetailRow("Gender:", report['gender'] ?? 'N/A'),
-        pw.SizedBox(height: 8),
+        _buildDetailRow("Symptoms:", report['symptoms']?.toString() ?? 'N/A'),
+        pw.SizedBox(height: 6),
         _buildSectionHeader("Recording Details"),
         _buildDetailRow("Record Date:", recordDateStr),
         _buildDetailRow("File Path:", report['file_path'] ?? 'N/A'),
-        pw.SizedBox(height: 12),
+        pw.SizedBox(height: 8),
         _buildSectionHeader("Raw Waveform & Spectrogram"),
         pw.Center(
           child: pw.Column(
@@ -254,7 +255,7 @@ class PdfExporter {
             ],
           ),
         ),
-        pw.SizedBox(height: 10),
+        pw.SizedBox(height: 8),
         _buildSectionHeader("AI Analysis"),
         _buildDetailRow("Classification:", report['diagnosis'] ?? 'N/A'),
         if (probs.isNotEmpty) ...[

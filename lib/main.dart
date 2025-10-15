@@ -1,5 +1,6 @@
 import 'package:cardioscope_app/pages/onboarding_page.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
+import 'package:cardioscope_app/utils/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -32,7 +33,6 @@ Future<void> main() async {
   final tflite = TfliteService();
   await tflite.loadModels(loadClassifier: true);
 
-  // ✅ Verify DB structure once after model load
   await DatabaseHelper.instance.verifyDatabaseStructure();
 
   runApp(CardioScopeApp(
@@ -66,63 +66,22 @@ class CardioScopeApp extends StatelessWidget {
       builder: (_, mode, __) {
         return MaterialApp(
           title: 'CardioScope',
-          debugShowCheckedModeBanner: false,
+          theme: AppTheme.lightTheme.copyWith(
+            bottomAppBarTheme: const BottomAppBarThemeData(
+              color: Colors.white,
+              elevation: 10,
+              surfaceTintColor: Colors.transparent,
+            ),
+          ),
+          darkTheme: AppTheme.darkTheme.copyWith(
+            bottomAppBarTheme: const BottomAppBarThemeData(
+              color: Color(0xFF1E1E1E),
+              elevation: 10,
+              surfaceTintColor: Colors.transparent,
+            ),
+          ),
           themeMode: mode,
-
-          // 🌞 LIGHT THEME
-          theme: ThemeData(
-            brightness: Brightness.light,
-            scaffoldBackgroundColor: AppColors.scaffoldBackground,
-            primaryColor: AppColors.primary,
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: AppColors.primary,
-              brightness: Brightness.light,
-              secondary: AppColors.accent,
-            ),
-            appBarTheme: const AppBarTheme(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              iconTheme: IconThemeData(color: Colors.white),
-            ),
-            floatingActionButtonTheme: const FloatingActionButtonThemeData(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-            ),
-            bottomAppBarTheme: const BottomAppBarThemeData(
-              color: Colors.white, // ✅ Fixed light theme background
-              elevation: 10,
-              surfaceTintColor: Colors.transparent,
-            ),
-            useMaterial3: true,
-          ),
-
-          // 🌚 DARK THEME
-          darkTheme: ThemeData(
-            brightness: Brightness.dark,
-            primaryColor: AppColors.primary,
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: AppColors.primary,
-              brightness: Brightness.dark,
-              secondary: AppColors.accent,
-            ),
-            scaffoldBackgroundColor: const Color(0xFF121212),
-            appBarTheme: const AppBarTheme(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              iconTheme: IconThemeData(color: Colors.white),
-            ),
-            floatingActionButtonTheme: const FloatingActionButtonThemeData(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-            ),
-            bottomAppBarTheme: const BottomAppBarThemeData(
-              color: Color(0xFF1E1E1E), // ✅ Fixed dark theme background
-              elevation: 10,
-              surfaceTintColor: Colors.transparent,
-            ),
-            useMaterial3: true,
-          ),
-
+          debugShowCheckedModeBanner: false,
           home: _getInitialPage(),
           routes: {
             '/record': (context) => const RecordPage(),
@@ -180,10 +139,8 @@ class _MainNavigationState extends State<MainNavigation> {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     final savedPath = await storageService.getSavedPath();
-    debugPrint('🔍 Checking saved folder path: $savedPath');
 
     if (savedPath == null || savedPath.isEmpty) {
-      debugPrint('🆕 No folder path found. Showing folder selection dialog.');
       if (!mounted) return;
 
       final proceed = await showDialog<bool>(
@@ -193,7 +150,7 @@ class _MainNavigationState extends State<MainNavigation> {
           iconColor: AppColors.deep,
           title: 'Select Save Folder',
           message:
-              'To save recordings properly, please select a folder for your recordings (e.g., in your Downloads folder).',
+              'Please select a folder to save your recordings (e.g., Downloads).',
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
@@ -211,47 +168,12 @@ class _MainNavigationState extends State<MainNavigation> {
         ),
       );
 
-      if (proceed != true) {
-        if (!mounted) return;
-        await showDialog(
-          context: context,
-          builder: (ctx) => _buildDialog(
-            icon: Icons.warning_amber_rounded,
-            iconColor: AppColors.warning,
-            title: 'Folder Required',
-            message:
-                'You must select a save location before you can record.\n\nTap the mic button again to choose a folder.',
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-        return;
-      }
+      if (proceed != true) return;
 
       final pickedPath = await storageService.pickFolder();
-      debugPrint('📁 Folder picked: $pickedPath');
-
-      if (!mounted) return;
       if (pickedPath == null || pickedPath.isEmpty) {
-        await showDialog(
-          context: context,
-          builder: (ctx) => _buildDialog(
-            icon: Icons.warning_amber_rounded,
-            iconColor: AppColors.warning,
-            title: 'Folder Required',
-            message:
-                'Folder selection was cancelled. You must select a folder to save your recordings.',
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Folder selection cancelled.')),
         );
         return;
       }
@@ -285,22 +207,12 @@ class _MainNavigationState extends State<MainNavigation> {
           Expanded(
             child: Text(
               title,
-              style:
-                  const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
             ),
           ),
         ],
       ),
-      content: Padding(
-        padding: const EdgeInsets.only(top: 4.0),
-        child: Text(
-          message,
-          style: const TextStyle(fontSize: 15, height: 1.5),
-          textAlign: TextAlign.start,
-        ),
-      ),
-      actionsAlignment: MainAxisAlignment.end,
-      actionsPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      content: Text(message, style: const TextStyle(fontSize: 15)),
       actions: actions,
     );
   }
@@ -318,9 +230,7 @@ class _MainNavigationState extends State<MainNavigation> {
     return Scaffold(
       body: PageView(
         controller: _pageController,
-        onPageChanged: (index) {
-          setState(() => _selectedIndex = index);
-        },
+        onPageChanged: (index) => setState(() => _selectedIndex = index),
         children: _pages,
       ),
       floatingActionButton: Hero(
@@ -335,8 +245,6 @@ class _MainNavigationState extends State<MainNavigation> {
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-
-      // ✅ BottomAppBar now fully theme-driven
       bottomNavigationBar: BottomAppBar(
         shape: const CircularNotchedRectangle(),
         notchMargin: 10.0,
@@ -347,7 +255,7 @@ class _MainNavigationState extends State<MainNavigation> {
             Theme.of(context).bottomAppBarTheme.surfaceTintColor,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: <Widget>[
+          children: [
             _buildNavItem(Icons.dashboard_rounded, 'Dashboard', 0),
             const SizedBox(width: 80),
             _buildNavItem(Icons.analytics_rounded, 'Results', 1),
@@ -368,7 +276,7 @@ class _MainNavigationState extends State<MainNavigation> {
         padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 16.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
+          children: [
             Icon(icon, color: color),
             const SizedBox(height: 4),
             Text(label, style: TextStyle(color: color, fontSize: 12)),
