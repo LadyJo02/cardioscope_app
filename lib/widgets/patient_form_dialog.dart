@@ -1,4 +1,6 @@
 //lib\widgets\patient_form_dialog.dart
+import 'dart:developer' as developer;
+
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
@@ -7,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../database_helper.dart';
 import '../services/storage_service.dart';
+
 
 class PatientFormDialog extends StatefulWidget {
   final bool isSwitchMode;
@@ -83,63 +86,73 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
     }
   }
 
+
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+  developer.log("🩺 Attempting to submit patient form...");
 
-    final name = _nameController.text.trim();
-    final birthday = _birthdayController.text.trim();
-    final gender = _selectedGender ?? 'Unspecified';
-    final age = _selectedDate != null ? _calculateAge(_selectedDate!) : null;
-
-    final basePath = await storage.getSavedPath();
-    if (basePath == null || basePath.isEmpty) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a base folder first.')),
-      );
-      return;
-    }
-
-    final patientFolder = await storage.createPatientFolder(basePath, name);
-    final prefs = await SharedPreferences.getInstance();
-    final practitionerId = prefs.getInt('practitioner_id') ?? 1;
-
-    final patientData = {
-      'name': name,
-      'birthday': birthday,
-      'age': age,
-      'gender': gender,
-      'symptoms': _symptomsController.text.trim(),
-      'folder_path': patientFolder,
-    };
-
-    // ✅ If patient exists, update their info — including symptoms
-    final existing = await db.getPatientDetails(name);
-    late int patientId;
-    if (existing != null) {
-      await db.database.then((conn) {
-        conn.update(
-          'patients',
-          patientData,
-          where: 'patient_id = ?',
-          whereArgs: [existing['patient_id']],
-        );
-      });
-      patientId = existing['patient_id'];
-    } else {
-      patientId = await db.findOrCreatePatient(practitionerId, patientData);
-    }
-
-    await db.updatePatientFolderPath(patientId, patientFolder);
-    await storage.setCurrentPatient(patientId);
-
-    if (!mounted) return;
-    Navigator.of(context).pop({
-      'patient_id': patientId,
-      ...patientData,
-
-    });
+  if (!_formKey.currentState!.validate()) {
+    developer.log("❌ Validation failed!");
+    return;
   }
+
+  developer.log("✅ Validation passed, continuing...");
+
+  final name = _nameController.text.trim();
+  final birthday = _birthdayController.text.trim();
+  final gender = _selectedGender ?? 'Unspecified';
+  final age = _selectedDate != null ? _calculateAge(_selectedDate!) : null;
+
+  final basePath = await storage.getSavedPath();
+  if (basePath == null || basePath.isEmpty) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please select a base folder first.')),
+    );
+    return;
+  }
+
+  final patientFolder = await storage.createPatientFolder(basePath, name);
+  final prefs = await SharedPreferences.getInstance();
+  final practitionerId = prefs.getInt('practitioner_id') ?? 1;
+
+  final patientData = {
+    'name': name,
+    'birthday': birthday,
+    'age': age,
+    'gender': gender,
+    'symptoms': _symptomsController.text.trim(),
+    'folder_path': patientFolder,
+  };
+
+  // ✅ If patient exists, update their info — including symptoms
+  final existing = await db.getPatientDetails(name);
+  late int patientId;
+  if (existing != null) {
+    await db.database.then((conn) {
+      conn.update(
+        'patients',
+        patientData,
+        where: 'patient_id = ?',
+        whereArgs: [existing['patient_id']],
+      );
+    });
+    patientId = existing['patient_id'];
+  } else {
+    patientId = await db.findOrCreatePatient(practitionerId, patientData);
+  }
+
+  await db.updatePatientFolderPath(patientId, patientFolder);
+  await storage.setCurrentPatient(patientId);
+
+  developer.log("✅ Returning patient data for $name (ID: $patientId)");
+  if (!mounted) return;
+
+  Navigator.of(context).pop({
+    'patient_id': patientId,
+    ...patientData,
+  });
+}
+
 
     
 

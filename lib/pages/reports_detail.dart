@@ -1,4 +1,3 @@
-// lib/pages/reports_detail.dart
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -34,7 +33,6 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   late Map<String, double> _currentProbabilities;
   String _practitionerName = "Practitioner";
 
-  // ✅ Local mutable copy of report
   late Map<String, dynamic> _localReport;
 
   @override
@@ -44,8 +42,6 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     _waveformFuture = _loadWaveformData();
     _initializeState();
     _loadPractitionerName();
-
-    // 🕐 Delay refresh slightly so patient_id is fully loaded
     Future.delayed(const Duration(milliseconds: 200), _refreshPatientDetails);
 
     final path = _localReport['file_path'] as String?;
@@ -83,45 +79,33 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     }
   }
 
-// ✅ Fetch updated patient info (especially symptoms, gender, birthday)
-Future<void> _refreshPatientDetails() async {
-  try {
-    final db = DatabaseHelper.instance;
-    final patientIdRaw = _localReport['patient_id'];
-    if (patientIdRaw == null) {
-      debugPrint("⚠️ _refreshPatientDetails: patient_id is null");
-      return;
-    }
+  Future<void> _refreshPatientDetails() async {
+    try {
+      final db = DatabaseHelper.instance;
+      final patientIdRaw = _localReport['patient_id'];
+      if (patientIdRaw == null) return;
 
-    // Convert to int safely
-    final int? patientId = patientIdRaw is int
-        ? patientIdRaw
-        : int.tryParse(patientIdRaw.toString());
+      final int? patientId = patientIdRaw is int
+          ? patientIdRaw
+          : int.tryParse(patientIdRaw.toString());
+      if (patientId == null) return;
 
-    if (patientId == null) {
-      debugPrint("⚠️ _refreshPatientDetails: patient_id invalid → $patientIdRaw");
-      return;
+      final patient = await db.getPatientById(patientId);
+      if (patient != null && mounted) {
+        setState(() {
+          _localReport['name'] = patient['name'] ?? _localReport['name'];
+          _localReport['birthday'] =
+              patient['birthday'] ?? _localReport['birthday'];
+          _localReport['gender'] = patient['gender'] ?? _localReport['gender'];
+          _localReport['age'] = patient['age'] ?? _localReport['age'];
+          _localReport['symptoms'] =
+              patient['symptoms'] ?? _localReport['symptoms'];
+        });
+      }
+    } catch (e) {
+      debugPrint("❌ Error refreshing patient details: $e");
     }
-
-    final patient = await db.getPatientById(patientId);
-    if (patient != null && mounted) {
-      setState(() {
-        _localReport['name'] = patient['name'] ?? _localReport['name'];
-        _localReport['birthday'] = patient['birthday'] ?? _localReport['birthday'];
-        _localReport['gender'] = patient['gender'] ?? _localReport['gender'];
-        _localReport['age'] = patient['age'] ?? _localReport['age'];
-        _localReport['symptoms'] = patient['symptoms'] ?? _localReport['symptoms'];
-      });
-      debugPrint("🔄 Refreshed patient details for ID $patientId → ${patient['symptoms']}");
-    } else {
-      debugPrint("⚠️ No patient found with ID $patientId");
-    }
-  } catch (e) {
-    debugPrint("❌ Error refreshing patient details: $e");
   }
-}
-
-
 
   @override
   void dispose() {
@@ -169,8 +153,6 @@ Future<void> _refreshPatientDetails() async {
 
     if (!mounted) return;
     setState(() => _isReanalyzing = true);
-    debugPrint("🎨 Generating Mel-Spectrogram for: $filePath");
-
     final bytes = await _tfliteService.generateMelImageBytes(filePath);
 
     if (!mounted) return;
@@ -178,20 +160,12 @@ Future<void> _refreshPatientDetails() async {
       _melPng = bytes;
       _isReanalyzing = false;
     });
-
-    debugPrint("✅ Spectrogram generation complete.");
   }
 
   Future<void> _reAnalyze() async {
     final filePath = _localReport['file_path'] as String?;
     final recordId = _localReport['record_id'] as int?;
-    if (filePath == null || recordId == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Missing file or record ID.")),
-      );
-      return;
-    }
+    if (filePath == null || recordId == null) return;
 
     setState(() => _isReanalyzing = true);
     try {
@@ -239,147 +213,6 @@ Future<void> _refreshPatientDetails() async {
       setState(() => _isReanalyzing = false);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text("Re-analysis failed: $e")));
-    }
-  }
-
-  Future<void> _showEditDialog() async {
-    final db = DatabaseHelper.instance;
-    final nameCtrl = TextEditingController(text: _localReport['name'] ?? '');
-    final genderCtrl = TextEditingController(text: _localReport['gender'] ?? '');
-    final birthdayCtrl =
-        TextEditingController(text: _localReport['birthday'] ?? '');
-    final symptomsCtrl = TextEditingController(text: _localReport['symptoms'] ?? '');
-
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Edit Patient Info"),
-        content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: "Name")),
-            const SizedBox(height: 8),
-            TextField(
-                controller: genderCtrl,
-                decoration: const InputDecoration(labelText: "Gender")),
-            const SizedBox(height: 8),
-            TextField(
-              controller: birthdayCtrl,
-              readOnly: true,
-              decoration: const InputDecoration(
-                labelText: "Birthday",
-                suffixIcon: Icon(Icons.calendar_today),
-              ),
-              onTap: () async {
-                DateTime? picked = await showDatePicker(
-                  context: context,
-                  initialDate:
-                      DateTime.tryParse(birthdayCtrl.text) ?? DateTime(2000),
-                  firstDate: DateTime(1900),
-                  lastDate: DateTime.now(),
-                );
-                if (picked != null) {
-                  birthdayCtrl.text =
-                      DateFormat('yyyy-MM-dd').format(picked);
-                }
-              },
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: symptomsCtrl,
-              decoration: const InputDecoration(labelText: "Symptoms"),
-              maxLines: 2,
-            ),
-          ]),
-        ),
-
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Theme.of(context).cardColor,
-            ),
-            child: const Text("Save"),
-            onPressed: () async {
-              final patientId = _localReport['patient_id'] as int?;
-              if (patientId != null) {
-                await db.database.then((conn) {
-                  conn.update(
-                    'patients',
-                    {
-                      'name': nameCtrl.text.trim(),
-                      'gender': genderCtrl.text.trim(),
-                      'birthday': birthdayCtrl.text.trim(),
-                      'symptoms': symptomsCtrl.text.trim(),
-                    },
-                    where: 'patient_id = ?',
-                    whereArgs: [patientId],
-                  );
-                });
-
-                if (!context.mounted) return;
-                final updated = Map<String, dynamic>.from(_localReport);
-                updated['name'] = nameCtrl.text.trim();
-                updated['gender'] = genderCtrl.text.trim();
-                updated['birthday'] = birthdayCtrl.text.trim();
-                updated['symptoms'] = symptomsCtrl.text.trim();
-
-
-                setState(() {
-                  _localReport = updated;
-                });
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("✅ Patient info updated.")),
-                );
-                Navigator.pop(context, true);
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _confirmDelete() async {
-    final recordId = _localReport['record_id'] as int?;
-    if (recordId == null) return;
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Confirm Delete"),
-        content: const Text(
-            "Are you sure you want to delete this record? This cannot be undone."),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text("Cancel")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Theme.of(context).cardColor,
-            ),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("Delete"),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      final db = DatabaseHelper.instance;
-      await db.deleteRecordById(recordId);
-      if (!mounted) return;
-      Navigator.pop(context, true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("🗑 Report deleted successfully.")),
-      );
     }
   }
 
@@ -448,18 +281,18 @@ Future<void> _refreshPatientDetails() async {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.onPrimary),
+        iconTheme:
+            IconThemeData(color: Theme.of(context).colorScheme.onPrimary),
         title: Text(
           'Report for ${_localReport['name'] ?? 'Unnamed'}',
           style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
         ),
         actions: [
           PopupMenuButton<String>(
-            icon: Icon(Icons.more_vert, color: Theme.of(context).colorScheme.surface),
+            icon: Icon(Icons.more_vert,
+                color: Theme.of(context).colorScheme.surface),
             onSelected: (value) {
               if (value == 'reanalyze') _reAnalyze();
-              if (value == 'edit') _showEditDialog();
-              if (value == 'delete') _confirmDelete();
             },
             itemBuilder: (context) => const [
               PopupMenuItem(
@@ -470,64 +303,42 @@ Future<void> _refreshPatientDetails() async {
                   Text("Re-analyze"),
                 ]),
               ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'edit',
-                child: Row(children: [
-                  Icon(Icons.edit, color: AppColors.deep),
-                  SizedBox(width: 8),
-                  Text("Edit Patient Info"),
-                ]),
-              ),
-              PopupMenuItem(
-                value: 'delete',
-                child: Row(children: [
-                  Icon(Icons.delete, color: AppColors.warning),
-                  SizedBox(width: 8),
-                  Text("Delete Record"),
-                ]),
-              ),
             ],
           ),
         ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildDetailSection(patientIdFormatted, dateString),
-            const SizedBox(height: 16),
-            _buildAnalysisSection(),
-            const SizedBox(height: 16),
-            _buildSpectrogramSection(),
-            const SizedBox(height: 16),
-            _buildWaveformSection(),
-            const SizedBox(height: 80),
-          ],
-        ),
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _buildDetailSection(patientIdFormatted, dateString),
+          const SizedBox(height: 16),
+          _buildAnalysisSection(),
+          const SizedBox(height: 16),
+          _buildSpectrogramSection(),
+          const SizedBox(height: 16),
+          _buildWaveformSection(),
+          const SizedBox(height: 80),
+        ]),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _handleExportPdf,
         backgroundColor: AppColors.primary,
-        icon: Icon(
-          Icons.picture_as_pdf,
-          color: Theme.of(context).colorScheme.onPrimary, 
-        ),
-        label:Text(
+        icon: Icon(Icons.picture_as_pdf,
+            color: Theme.of(context).colorScheme.onPrimary),
+        label: Text(
           "Export PDF",
           style: TextStyle(
-            color: Theme.of(context).colorScheme.onPrimary, // adaptive text color
-            fontWeight: FontWeight.w600,
-            ),
-          ),
+              color: Theme.of(context).colorScheme.onPrimary,
+              fontWeight: FontWeight.w600),
         ),
-      );
-    }
+      ),
+    );
+  }
 
+  // 🧱 Detail Section
   Widget _buildDetailSection(String patientIdFormatted, String dateString) {
     return Card(
-      color: Theme.of(context).cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -553,31 +364,33 @@ Future<void> _refreshPatientDetails() async {
     );
   }
 
-Widget _buildRow(String label, String value) {
-  return Padding(
-    padding: const EdgeInsets.symmetric(vertical: 6.0),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          "$label ",
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Theme.of(context).brightness == Brightness.dark
-              ? Colors.white70
-              : Colors.black87,
+  Widget _buildRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "$label ",
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.white70
+                  : Colors.black87,
+            ),
           ),
-        ),
-        Expanded(
-          child: SelectableText(value, textAlign: TextAlign.end),
-        ),
-      ],
-    ),
-  );
-}
+          Expanded(child: SelectableText(value, textAlign: TextAlign.end)),
+        ],
+      ),
+    );
+  }
+
+  // 🤖 AI Analysis Section
   Widget _buildAnalysisSection() {
+    final sortedEntries = _currentProbabilities.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
     return Card(
-      color: Theme.of(context).cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
@@ -591,82 +404,86 @@ Widget _buildRow(String label, String value) {
                     .titleLarge
                     ?.copyWith(fontWeight: FontWeight.bold)),
             const Divider(height: 20),
-
-            // 🩺 Classification
             _buildRow('Classification:', _currentDiagnosis),
             const SizedBox(height: 10),
-
-            // 🧠 Detailed Breakdown heading
-            Text(
-              "Detailed Breakdown:",
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-            ),
+            Text("Detailed Breakdown:",
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 8),
 
-            // 📊 Probabilities visualization
             if (_currentProbabilities.isNotEmpty)
-              ..._currentProbabilities.entries
-                  .map((entry) => _buildProbabilityRow(entry.key, entry.value))
-                  
+              ...sortedEntries.asMap().entries.map((entry) {
+                final isTop = entry.key == 0;
+                return _buildProbabilityRow(entry.value.key, entry.value.value,
+                    highlight: isTop);
+              })
             else
-              Text(
-                "No probabilities available.",
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
-              ),
+              Text("No probabilities available.",
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.onSurface)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildProbabilityRow(String label, double value) {
+  // 📊 Probability Row
+  Widget _buildProbabilityRow(String label, double value,
+      {bool highlight = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(children: [
-        Expanded(
+      child: Row(
+        children: [
+          Expanded(
             flex: 2,
-            child: Text(
-              label,
-              style: TextStyle(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.white70
-                    : Colors.grey.shade700,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-        Expanded(
-          flex: 5,
-          child: LinearProgressIndicator(
-            value: value,
-            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-
-            color: UIHelpers.getStatusColor(label),
-            minHeight: 12,
-            borderRadius: BorderRadius.circular(6),
+            child: Text(label,
+                style: TextStyle(
+                  fontWeight: highlight ? FontWeight.bold : FontWeight.w500,
+                  color: highlight
+                      ? AppColors.primaryLight
+                      : (isDark ? Colors.white70 : Colors.grey.shade700),
+                  fontSize: highlight ? 15 : 14,
+                )),
           ),
-        ),
-        Expanded(
+          Expanded(
+            flex: 5,
+            child: LinearProgressIndicator(
+              value: value,
+              backgroundColor: isDark ? Colors.white10 : Colors.grey.shade200,
+              color: UIHelpers.getStatusColor(label)
+                  .withValues(alpha: highlight ? 0.95 : 0.85),
+              minHeight: highlight ? 14 : 12,
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+          Expanded(
             flex: 2,
             child: Text("${(value * 100).toStringAsFixed(2)}%",
-                textAlign: TextAlign.end)),
-      ]),
+                textAlign: TextAlign.end,
+                style: TextStyle(
+                  fontWeight: highlight ? FontWeight.bold : FontWeight.normal,
+                  color: highlight
+                      ? AppColors.primaryLight
+                      : (isDark ? Colors.white70 : Colors.grey.shade800),
+                )),
+          ),
+        ],
+      ),
     );
   }
 
+  // 🎨 Spectrogram Section
   Widget _buildSpectrogramSection() {
     return Card(
-      color: Theme.of(context).cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text("Model Input (Mel-Spectrogram)",
               style: Theme.of(context)
                   .textTheme
@@ -675,13 +492,10 @@ Widget _buildRow(String label, String value) {
           const Divider(height: 20),
           if (_melPng != null)
             ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.memory(
-                  _melPng!, 
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                ),
-              )
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(_melPng!,
+                  width: double.infinity, fit: BoxFit.cover),
+            )
           else if (_isReanalyzing)
             const Center(child: CircularProgressIndicator())
           else
@@ -701,18 +515,16 @@ Widget _buildRow(String label, String value) {
     );
   }
 
+  // 🔊 Waveform Section
   Widget _buildWaveformSection() {
     return Card(
-      color: Theme.of(context).cardColor,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(children: [
           Text("Raw Waveform & Playback",
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
+              style: Theme.of(context).textTheme.titleLarge
                   ?.copyWith(fontWeight: FontWeight.bold)),
           const Divider(height: 20),
           SizedBox(
@@ -758,8 +570,8 @@ Widget _buildRow(String label, String value) {
       stream: _player.playerStateStream,
       builder: (context, snapshot) {
         final playerState = snapshot.data;
-        final processingState = playerState?.processingState;
         final playing = playerState?.playing ?? false;
+        final processingState = playerState?.processingState;
 
         IconData icon = Icons.play_arrow_rounded;
         if (playing) {
@@ -768,22 +580,20 @@ Widget _buildRow(String label, String value) {
           icon = Icons.replay_rounded;
         }
 
-        return Column(mainAxisSize: MainAxisSize.min, children: [
-          IconButton(
-            icon: Icon(icon, color: AppColors.primary),
-            iconSize: 48,
-            onPressed: () {
-              if (playing) {
-                _player.pause();
-              } else if (processingState == ProcessingState.completed) {
-                _player.seek(Duration.zero);
-                _player.play();
-              } else {
-                _player.play();
-              }
-            },
-          ),
-        ]);
+        return IconButton(
+          icon: Icon(icon, color: AppColors.primary),
+          iconSize: 48,
+          onPressed: () {
+            if (playing) {
+              _player.pause();
+            } else if (processingState == ProcessingState.completed) {
+              _player.seek(Duration.zero);
+              _player.play();
+            } else {
+              _player.play();
+            }
+          },
+        );
       },
     );
   }

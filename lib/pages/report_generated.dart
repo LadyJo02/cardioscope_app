@@ -1,4 +1,3 @@
-// lib\pages\report_generated.dart
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -90,10 +89,12 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     if (!await file.exists()) return [];
     final bytes = await file.readAsBytes();
     if (bytes.lengthInBytes <= 44) return [];
+
     final pcmBytes = bytes.sublist(44);
     final byteData = ByteData.view(pcmBytes.buffer);
     final spots = <FlSpot>[];
     const int downsamplingFactor = 50;
+
     for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsamplingFactor)) {
       if (i + 2 <= pcmBytes.lengthInBytes) {
         final sample = byteData.getInt16(i, Endian.little) / 32768.0;
@@ -124,10 +125,20 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       }
     }
 
+    // 🔽 Sort probabilities descending once
+    final sortedProbs = widget.probabilities.entries.toList()
+      ..sort((a, b) => 
+          (double.tryParse(b.value.toString()) ?? 0)
+              .compareTo(double.tryParse(a.value.toString()) ?? 0));
+    
+    debugPrint("🔍 Sorted probabilities: $sortedProbs");
+
     return Scaffold(
       appBar: AppBar(
-        title: Text("Analysis for ${widget.patientName}",
-            style: TextStyle(color: Theme.of(context).colorScheme.onPrimary)),
+        title: Text(
+          "Analysis for ${widget.patientName}",
+          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+        ),
         backgroundColor: AppColors.primary,
         leading: IconButton(
           icon: Icon(Icons.close, color: Theme.of(context).colorScheme.surface),
@@ -138,17 +149,19 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
         padding: const EdgeInsets.all(16.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Center(
-            child: Text('Analysis Complete!',
-                style: Theme.of(context)
-                    .textTheme
-                    .headlineSmall
-                    ?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green[800])),
+            child: Text(
+              'Analysis Complete!',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green[800]),
+            ),
           ),
           const SizedBox(height: 16),
 
-          // 1️⃣ 🩺 Patient Details
+          // 🩺 Patient Details
           _buildCard(
             title: 'Patient Details',
             child:
@@ -160,36 +173,49 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
               _buildDetailRow("Gender:", widget.patientGender),
               _buildDetailRow("Symptoms:", widget.symptoms ?? "-"),
               _buildDetailRow("File:", widget.filePath.split('/').last),
-              _buildDetailRow("Recorded:",
-                  DateFormat('MMMM d, yyyy HH:mm').format(widget.recordedDate)),
+              _buildDetailRow(
+                "Recorded:",
+                DateFormat('MMMM d, yyyy HH:mm').format(widget.recordedDate),
+              ),
             ]),
           ),
           const SizedBox(height: 16),
 
-          // 2️⃣ 🤖 AI Analysis
+          // 🤖 AI Analysis
           _buildCard(
             title: 'AI Analysis',
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _buildDetailRow("Classification:", widget.classification),
               const SizedBox(height: 10),
-              Text("Detailed Breakdown:",
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+              Text(
+                "Detailed Breakdown:",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
               const SizedBox(height: 8),
-              if (widget.probabilities.isEmpty)
-                Text("No probabilities available",
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface))
+              if (sortedProbs.isEmpty)
+                Text(
+                  "No probabilities available",
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface),
+                )
               else
-                ...widget.probabilities.entries.map((entry) {
+                ...sortedProbs.asMap().entries.map((entry) {
+                  final isTop = entry.key == 0;
                   return _buildProbabilityRow(
-                      entry.key, (entry.value as num).toDouble());
+                    entry.value.key,
+                    (entry.value.value as num).toDouble(),
+                    highlight: isTop,
+                  );
                 }),
             ]),
           ),
           const SizedBox(height: 16),
 
-          // 3️⃣ 🎨 Model Input (Mel-Spectrogram)
+          // 🎨 Model Input (Mel-Spectrogram)
           _buildCard(
             title: 'Model Input (Mel-Spectrogram)',
             child: widget.melPngBytes != null
@@ -197,18 +223,18 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                     decoration: BoxDecoration(
                       color: Theme.of(context).brightness == Brightness.dark
                           ? const Color(0xFF1E1E1E)
-                        : const Color(0xFFF0F0F0),
+                          : const Color(0xFFF0F0F0),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(
-                    widget.melPngBytes!,
-                    width: double.infinity,
-                    fit: BoxFit.contain, // 🔹 stretch width but keep proportions
-                  ),
-                )
-              )
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.memory(
+                        widget.melPngBytes!,
+                        width: double.infinity,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  )
                 : const Center(
                     child: Padding(
                       padding: EdgeInsets.symmetric(vertical: 24.0),
@@ -218,7 +244,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           ),
           const SizedBox(height: 16),
 
-          // 4️⃣ 🔊 Raw Waveform & Playback
+          // 🔊 Raw Waveform & Playback
           _buildCard(
             title: 'Raw Waveform & Playback',
             child:
@@ -228,8 +254,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                 child: FutureBuilder<List<FlSpot>>(
                   future: _waveformFuture,
                   builder: (context, snapshot) {
-                    if (snapshot.connectionState ==
-                        ConnectionState.waiting) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Center(child: CircularProgressIndicator());
                     }
                     if (!snapshot.hasData || snapshot.data!.isEmpty) {
@@ -251,8 +276,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                       ],
                       minY: -1,
                       maxY: 1,
-                      lineTouchData:
-                          const LineTouchData(enabled: false),
+                      lineTouchData: const LineTouchData(enabled: false),
                     ));
                   },
                 ),
@@ -286,7 +310,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
         backgroundColor: AppColors.primary,
         icon: Icon(
           Icons.picture_as_pdf,
-          color: Theme.of(context).colorScheme.onPrimary, // ✅ match reports_detail.dart
+          color: Theme.of(context).colorScheme.onPrimary,
         ),
         label: Text(
           "Export PDF",
@@ -299,6 +323,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     );
   }
 
+  // 🧱 CARD BUILDER
   Widget _buildCard({required String title, required Widget child}) {
     return Card(
       elevation: 2,
@@ -319,6 +344,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     );
   }
 
+  // 🎧 AUDIO PLAYER CONTROLS
   Widget _buildPlaybackControls() {
     return StreamBuilder<PlayerState>(
       stream: _player.playerStateStream,
@@ -384,42 +410,77 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     );
   }
 
-  Widget _buildProbabilityRow(String label, double value) {
+  // 📊 PROBABILITY ROW WITH HIGHLIGHT LOGIC
+  Widget _buildProbabilityRow(String label, double value, {bool highlight = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(children: [
-        Expanded(flex: 2, child: Text(label, style: TextStyle(color: Colors.grey.shade700))),
-        Expanded(
-          flex: 5,
-          child: LinearProgressIndicator(
-            value: value,
-            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-            color: UIHelpers.getStatusColor(label),
-            minHeight: 12,
-            borderRadius: BorderRadius.circular(6),
+      child: Row(
+        children: [
+          // LABEL
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: highlight ? FontWeight.bold : FontWeight.w500,
+                color: highlight
+                    ? AppColors.primaryLight
+                    : (isDark ? Colors.white70 : Colors.grey.shade700),
+                fontSize: highlight ? 15 : 14,
+              ),
+            ),
           ),
-        ),
-        Expanded(
-          flex: 2,
-          child: Text("${(value * 100).toStringAsFixed(2)}%",
-              textAlign: TextAlign.end),
-        ),
-      ]),
+
+          // PROGRESS BAR
+          Expanded(
+            flex: 5,
+            child: LinearProgressIndicator(
+              value: value,
+              backgroundColor: isDark ? Colors.white10 : Colors.grey.shade200,
+              color: UIHelpers.getStatusColor(label)
+                  .withValues(alpha: highlight ? 0.95 : 0.85),
+              minHeight: highlight ? 14 : 12,
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+
+          // PERCENTAGE
+          Expanded(
+            flex: 2,
+            child: Text(
+              "${(value * 100).toStringAsFixed(2)}%",
+              textAlign: TextAlign.end,
+              style: TextStyle(
+                fontWeight: highlight ? FontWeight.bold : FontWeight.normal,
+                color: highlight
+                    ? AppColors.primaryLight
+                    : (isDark ? Colors.white70 : Colors.grey.shade800),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildDetailRow(String label, String value,
-      {bool isSelectable = false}) {
+  // 🩺 DETAIL ROW BUILDER
+  Widget _buildDetailRow(String label, String value, {bool isSelectable = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text("$label ",
-            style: TextStyle(
-                fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+        Text(
+          "$label ",
+          style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface),
+        ),
         Expanded(
-            child: isSelectable
-                ? SelectableText(value, textAlign: TextAlign.end)
-                : Text(value, textAlign: TextAlign.end)),
+          child: isSelectable
+              ? SelectableText(value, textAlign: TextAlign.end)
+              : Text(value, textAlign: TextAlign.end),
+        ),
       ]),
     );
   }

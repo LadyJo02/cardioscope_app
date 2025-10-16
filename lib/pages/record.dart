@@ -317,24 +317,15 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   // ✅ Updated _showPatientDialog — allows editing symptoms before recording
+// ✅ Simplified and fixed _showPatientDialog using showDialog (returns proper result)
 Future<Map<String, dynamic>?> _showPatientDialog({bool switchMode = false}) async {
-  final result = await showGeneralDialog<Map<String, dynamic>>(
+  final result = await showDialog<Map<String, dynamic>>(
     context: context,
     barrierDismissible: switchMode,
-    barrierLabel: switchMode ? 'Switch Patient' : 'Patient Info',
-    transitionDuration: const Duration(milliseconds: 250),
-    pageBuilder: (_, __, ___) => PatientFormDialog(isSwitchMode: switchMode),
-    transitionBuilder: (_, anim, __, child) => FadeTransition(
-      opacity: anim,
-      child: SlideTransition(
-        position: Tween(begin: const Offset(0, 0.1), end: Offset.zero).animate(anim),
-        child: child,
-      ),
-    ),
+    builder: (_) => PatientFormDialog(isSwitchMode: switchMode),
   );
 
   if (result != null) {
-    // ✅ Immediately update _currentPatient and persist symptoms to DB
     final db = DatabaseHelper.instance;
     final patientId = result['patient_id'];
     await db.database.then((conn) {
@@ -346,7 +337,6 @@ Future<Map<String, dynamic>?> _showPatientDialog({bool switchMode = false}) asyn
       );
     });
 
-    // 🔄 Refresh current patient info in the UI
     await _loadCurrentPatient();
   }
 
@@ -354,21 +344,32 @@ Future<Map<String, dynamic>?> _showPatientDialog({bool switchMode = false}) asyn
 }
 
 
-  Future<void> _switchPatient() async {
-    final result = await _showPatientDialog(switchMode: true);
-    if (result != null) {
-      if (!mounted) return;
-      
-      final fresh = await db.getPatientById(result['patient_id']);
-      setState(() => _currentPatient = fresh ?? result);
-      
-      await storage.setCurrentPatient(result['patient_id']);
+  // 🩺 Smart patient logic: "Add" for first-time, "Switch" if existing
+Future<void> _switchPatient() async {
+  final hasExisting = _currentPatient != null;
+  final isSwitchMode = hasExisting;
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Updated and Switched to patient: ${result['name']}')));
-    }
-  }
+  final result = await _showPatientDialog(switchMode: isSwitchMode);
+  if (result == null) return;
+
+  if (!mounted) return;
+
+  final fresh = await db.getPatientById(result['patient_id']);
+  setState(() => _currentPatient = fresh ?? result);
+  await storage.setCurrentPatient(result['patient_id']);
+
+  if (!mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(isSwitchMode
+          ? 'Switched to patient: ${result['name']}'
+          : 'Added new patient: ${result['name']}'),
+      backgroundColor: AppColors.primary,
+      duration: const Duration(seconds: 2),
+    ),
+  );
+}
+
 
   // === waveform visualisation ===
   void _updateWaveform(Uint8List rawData) {
