@@ -2,6 +2,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cardioscope_app/utils/latency_debug.dart';
 import 'package:excel/excel.dart';
 import 'package:flutter/material.dart' show DateTimeRange;
 import 'package:intl/intl.dart';
@@ -16,6 +17,7 @@ class ExcelExporter {
     required String practitionerName,
     required DateTimeRange dateRange,
   }) async {
+    LatencyDebug.start("📊 Excel", "Generating Excel export (${reports.length} records)");
     if (reports.isEmpty) return;
 
     final excel = Excel.createExcel();
@@ -40,7 +42,7 @@ class ExcelExporter {
       final patientIdFormatted = patientId != null
           ? DatabaseHelper.instance.formatPatientId(patientId)
           : 'N/A';
-      
+
       String recordDateStr = 'N/A';
       if (report['record_date'] != null) {
         try {
@@ -63,6 +65,7 @@ class ExcelExporter {
         ((probs['N'] as num?)?.toDouble() ?? 0.0) * 100,
       ]);
     }
+    LatencyDebug.mark("📊 Excel", "All rows added");
 
     final dir = await getTemporaryDirectory();
     final startDate = DateFormat('yyyy-MM-dd').format(dateRange.start);
@@ -74,6 +77,7 @@ class ExcelExporter {
     final fileBytes = excel.save();
     if (fileBytes != null) {
       await file.writeAsBytes(fileBytes);
+      LatencyDebug.end("📊 Excel", "Excel file saved: ${file.path}");
       await Share.shareXFiles([XFile(file.path)], text: "CardioScope Excel Export");
     }
   }

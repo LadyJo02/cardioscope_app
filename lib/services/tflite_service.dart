@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'package:cardioscope_app/utils/latency_debug.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
@@ -30,22 +31,26 @@ class TfliteService {
   Future<void> loadModel() async => loadModels();
 
   Future<void> loadModels({bool loadClassifier = true}) async {
+    LatencyDebug.start("🧠 AI", "Loading TFLite models");
     try {
       if (!isPreprocReady) {
         debugPrint("🔎 Loading preprocess_mel.tflite...");
         _preprocInterpreter = await Interpreter.fromAsset(_preprocModelPath);
+        LatencyDebug.mark("🧠 AI", "Preprocess model loaded");
         debugPrint("✅ preprocess_mel.tflite loaded.");
       }
       if (!isMainReady) {
         debugPrint("🔎 Loading tcn_snn_full.tflite...");
         _mainInterpreter = await Interpreter.fromAsset(_mainModelPath);
+        LatencyDebug.mark("🧠 AI", "Classifier model loaded");
         debugPrint("✅ tcn_snn_full.tflite loaded.");
       }
     } catch (e, st) {
       debugPrint("❌ Model load error: $e\n$st");
     }
+    LatencyDebug.end("🧠 AI", "All models ready");
   }
-
+    
   void dispose() {
     _preprocInterpreter?.close();
     _mainInterpreter?.close();
@@ -81,7 +86,8 @@ class TfliteService {
     return waveform;
   }
 
-  Future<Map<String, dynamic>?> runInference({required String filePath}) async {
+  Future<Map<String, dynamic>?> runInference({required String filePath, String? session,}) async {
+    LatencyDebug.start("🧠 Inference", "Running AI on $filePath", session);
     try {
       await loadModels();
       if (!isMainReady) return null;
@@ -95,17 +101,21 @@ class TfliteService {
       final pcm = bytes.sublist(44);
       var waveform = _pcm16ToFloat32List(Uint8List.fromList(pcm));
       waveform = _normalizeWaveform(waveform);
+      LatencyDebug.mark("🧠 Inference", "Waveform normalized (length=${waveform.length})", session: session);
 
       final input = waveform.reshape([1, _expectedLength]);
       final outputTensor = _mainInterpreter!.getOutputTensors().first;
       final output = [List.filled(outputTensor.shape.last, 0.0)];
 
+      final t0 = DateTime.now();
       _mainInterpreter!.run(input, output);
+      LatencyDebug.mark("🧠 Inference", "Model run took ${DateTime.now().difference(t0).inMilliseconds} ms", session: session);
 
       final logits = output[0].map((e) => (e as num).toDouble()).toList();
       final probs = _softmax(logits);
       final bestIdx = probs.indexOf(probs.reduce(max));
 
+      LatencyDebug.end("🧠 Inference", "Inference done: ${_labels[bestIdx]} (${(probs[bestIdx]*100).toStringAsFixed(1)}%)", session);
       return {
         'label': _labels[bestIdx],
         'confidence': probs[bestIdx],
@@ -118,7 +128,8 @@ class TfliteService {
   }
 
   /// 🎨 Generate mel-spectrogram PNG (with optional PDF brightness correction)
-  Future<Uint8List?> generateMelImageBytes(String filePath, {bool forPdf = false}) async {
+  Future<Uint8List?> generateMelImageBytes(String filePath, {bool forPdf = false, String? session,}) async {
+    LatencyDebug.start("🧠 Mel", "Generating Mel-spectrogram for $filePath", session);
     try {
       await loadModels();
       if (!isPreprocReady) return null;
@@ -136,10 +147,13 @@ class TfliteService {
       final input = waveform.reshape([1, _expectedLength]);
       final melOut = List.generate(128, (_) => List.filled(150, 0.0));
 
+      final tMel = DateTime.now();
       _preprocInterpreter!.run(input, melOut);
+      LatencyDebug.mark("🧠 Mel", "Mel run took ${DateTime.now().difference(tMel).inMilliseconds} ms", session: session);
       return _melToColoredPngBytes(melOut, forPdf: forPdf);
     } catch (e, st) {
       debugPrint("❌ Mel image generation failed: $e\n$st");
+      LatencyDebug.end("🧠 Mel", "Mel image ready (128×150)", session);
       return null;
     }
   }

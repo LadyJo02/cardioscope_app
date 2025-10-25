@@ -10,6 +10,7 @@ import 'package:cardioscope_app/pages/report_generated.dart';
 import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/services/tflite_service.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
+import 'package:cardioscope_app/utils/latency_debug.dart';
 import 'package:cardioscope_app/widgets/custom_button.dart';
 import 'package:cardioscope_app/widgets/patient_form_dialog.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -83,13 +84,17 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   Future<void> _initAudioSession() async {
+    LatencyDebug.start("🔌 TXRX", "Initializing USB-C audio session");
     final session = await AudioSession.instance;
     await session.configure(const AudioSessionConfiguration.speech());
+    LatencyDebug.mark("🔌 TXRX", "AudioSession configured");
     _devicesSubscription = session.devicesStream.listen((devices) {
       _checkConnectedDevices(devices.toList());
     });
     _checkConnectedDevices((await session.getDevices()).toList());
+    LatencyDebug.end("🔌 TXRX", "Session + device stream initialized");
   }
+    
 
   void _checkConnectedDevices(List<AudioDevice> devices) {
     final usbDevice = devices.firstWhere(
@@ -140,7 +145,9 @@ class _RecordPageState extends State<RecordPage> {
 
   // === Main recording logic ===
   Future<void> _toggleRecording() async {
+    LatencyDebug.start("🎙 Record", _isRecording ? "Stopping recording" : "User tapped record");
     if (_isProcessing) return;
+    LatencyDebug.mark("🎙 Record", _isRecording ? "Stopped command issued" : "Started command issued");
     setState(() => _isProcessing = true);
 
     if (!_isUsbMicConnected) {
@@ -171,6 +178,7 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   Future<void> _startRecording() async {
+    LatencyDebug.mark("🎙 Record", "Recorder initializing");
     _recordingDataController = StreamController<Uint8List>();
     _dataSubscription = _recordingDataController!.stream.listen(_updateWaveform);
 
@@ -189,6 +197,7 @@ class _RecordPageState extends State<RecordPage> {
     );
 
     await _fileRecorder.start(recordConfig, path: tempPath);
+    LatencyDebug.mark("🎙 Record", "Recorder fully started (file + stream ready)");
 
     setState(() {
       _isRecording = true;
@@ -198,6 +207,7 @@ class _RecordPageState extends State<RecordPage> {
       _displayGain = 1.0;
     });
 
+    LatencyDebug.end("🎙 Record", "Recording officially running");
     _startTimer();
     _startAutoStopTimer();
   }
@@ -215,11 +225,15 @@ class _RecordPageState extends State<RecordPage> {
 
 
   Future<void> _stopRecording() async {
+    final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
+    LatencyDebug.resetSession(sessionId);
+    LatencyDebug.start("🎙 Stop", "Stopping recording session");
     _recordingTimer?.cancel();
     if (!_dataStreamer.isRecording) return;
 
     await _dataStreamer.stopRecorder();
     final path = await _fileRecorder.stop();
+    LatencyDebug.mark("🎙 Stop", "File saved at $path");
 
     if (path == null) return;
 
@@ -241,10 +255,12 @@ class _RecordPageState extends State<RecordPage> {
     setState(() => _isProcessing = false);
 
     await _handleRecordingSave(path, aiResult, melPng);
-  }
+    LatencyDebug.end("🎙 Stop", "Recording + postprocessing complete");
+  } 
 
   Future<void> _handleRecordingSave(
       String tempPath, Map<String, dynamic>? aiResult, Uint8List? melPng) async {
+      LatencyDebug.start("📦 Save", "Begin saving & DB pipeline");
     try {
       Map<String, dynamic>? patient = _currentPatient;
       if (patient == null) {
@@ -255,6 +271,7 @@ class _RecordPageState extends State<RecordPage> {
 
       final patientId = patient['patient_id'] ?? patient['id'];
       String? folderPath = patient['folder_path'];
+      
 
       if (folderPath == null || folderPath.isEmpty) {
         final basePath = await storage.getSavedPath();
@@ -272,6 +289,7 @@ class _RecordPageState extends State<RecordPage> {
 
       final tempFile = File(tempPath);
       await tempFile.copy(newPublicPath);
+      LatencyDebug.mark("📦 Save", "WAV copied to $newPublicPath");
       await tempFile.delete();
 
       final recordDate = DateTime.now();
@@ -280,6 +298,7 @@ class _RecordPageState extends State<RecordPage> {
         "file_path": newPublicPath,
         "record_date": recordDate.toIso8601String(),
       });
+      LatencyDebug.mark("📦 Save", "Record inserted into heart_sound_records");
 
       if (aiResult != null) {
         await db.insertAnalysis({
@@ -290,8 +309,10 @@ class _RecordPageState extends State<RecordPage> {
           "analysis_date": DateTime.now().toIso8601String(),
         });
       }
+      LatencyDebug.mark("📦 Save", "AI result stored in mitral_valve_analysis");
 
       if (!mounted) return;
+      LatencyDebug.end("📦 Save", "Pipeline finished — report ready for display");
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => ReportGeneratedPage(
@@ -373,6 +394,9 @@ Future<void> _switchPatient() async {
 
   // === waveform visualisation ===
   void _updateWaveform(Uint8List rawData) {
+    if (_spots.isEmpty) {
+  LatencyDebug.mark("🎙 Record", "First waveform chunk received (${rawData.lengthInBytes} bytes)");
+}
     if (!mounted) return;
     final bd = rawData.buffer.asByteData();
     final tmp = <double>[];
