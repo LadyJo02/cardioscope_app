@@ -1,4 +1,5 @@
 // 📁 lib/pages/record.dart
+// ✅ Updated with Patient Consent Confirmation before recording
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -41,19 +42,15 @@ class _RecordPageState extends State<RecordPage> {
 
   StreamController<Uint8List>? _recordingDataController;
   StreamSubscription? _dataSubscription;
-
   bool _isRecording = false;
   bool _isProcessing = false;
 
-  // Receiver connection status
   StreamSubscription<Set<AudioDevice>>? _devicesSubscription;
   bool _isUsbMicConnected = false;
 
-  // Waveform state
   List<FlSpot> _spots = [];
   double _timeCounter = 0;
   double _displayGain = 1.0;
-
   Timer? _timer;
   Timer? _recordingTimer;
   Duration _duration = Duration.zero;
@@ -77,9 +74,7 @@ class _RecordPageState extends State<RecordPage> {
     final patientId = await storage.getCurrentPatient();
     if (patientId != null) {
       final patient = await db.getPatientById(patientId);
-      if (patient != null && mounted) {
-        setState(() => _currentPatient = patient);
-      }
+      if (patient != null && mounted) setState(() => _currentPatient = patient);
     }
   }
 
@@ -94,7 +89,6 @@ class _RecordPageState extends State<RecordPage> {
     _checkConnectedDevices((await session.getDevices()).toList());
     LatencyDebug.end("🔌 TXRX", "Session + device stream initialized");
   }
-    
 
   void _checkConnectedDevices(List<AudioDevice> devices) {
     final usbDevice = devices.firstWhere(
@@ -110,23 +104,17 @@ class _RecordPageState extends State<RecordPage> {
 
     if (mounted) {
       final wasConnected = _isUsbMicConnected;
-      setState(() {
-        _isUsbMicConnected = usbDevice.id.isNotEmpty;
-      });
+      setState(() => _isUsbMicConnected = usbDevice.id.isNotEmpty);
 
-      // 🔔 show small toast if status changes
       if (_isUsbMicConnected != wasConnected) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _isUsbMicConnected
-                  ? 'CardioScope receiver connected'
-                  : 'CardioScope receiver disconnected',
-            ),
-            backgroundColor: _isUsbMicConnected ? AppColors.success : AppColors.warning,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(_isUsbMicConnected
+              ? 'CardioScope receiver connected'
+              : 'CardioScope receiver disconnected'),
+          backgroundColor:
+              _isUsbMicConnected ? AppColors.success : AppColors.warning,
+          duration: const Duration(seconds: 2),
+        ));
       }
     }
   }
@@ -143,11 +131,11 @@ class _RecordPageState extends State<RecordPage> {
     super.dispose();
   }
 
-  // === Main recording logic ===
+  // === MAIN RECORDING LOGIC ===
   Future<void> _toggleRecording() async {
-    LatencyDebug.start("🎙 Record", _isRecording ? "Stopping recording" : "User tapped record");
     if (_isProcessing) return;
-    LatencyDebug.mark("🎙 Record", _isRecording ? "Stopped command issued" : "Started command issued");
+
+    LatencyDebug.start("🎙 Record", _isRecording ? "Stopping recording" : "User tapped record");
     setState(() => _isProcessing = true);
 
     if (!_isUsbMicConnected) {
@@ -171,16 +159,69 @@ class _RecordPageState extends State<RecordPage> {
     if (_isRecording) {
       await _stopRecording();
     } else {
+      // 🧩 Ask patient consent before recording
+      final consentGiven = await _showConsentDialog();
+      if (!mounted) return;
+      if (consentGiven != true) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Recording cancelled — patient consent required.')));
+        setState(() => _isProcessing = false);
+        return;
+      }
+
+      // ✅ Add this toast before recording begins
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Consent logged.'),
+          backgroundColor: AppColors.success,
+          duration: Duration(seconds: 2),
+        ),
+      );
+
       await _startRecording();
     }
 
+
     if (mounted) setState(() => _isProcessing = false);
+  }
+
+  // ✅ PATIENT CONSENT DIALOG
+  Future<bool?> _showConsentDialog() async {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Patient Consent Required"),
+        content: const SingleChildScrollView(
+          child: Text(
+            "Before recording, please confirm that:\n\n"
+            "• The patient has been informed about the purpose of this recording.\n"
+            "• The recording will be stored securely on this device only.\n"
+            "• It may be used for diagnostic or academic analysis under confidentiality.\n\n"
+            "Do you confirm that patient consent has been obtained?",
+            style: TextStyle(fontSize: 14, height: 1.4),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Theme.of(context).cardColor),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Yes, I Confirm"),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _startRecording() async {
     LatencyDebug.mark("🎙 Record", "Recorder initializing");
     _recordingDataController = StreamController<Uint8List>();
-    _dataSubscription = _recordingDataController!.stream.listen(_updateWaveform);
+    _dataSubscription =
+        _recordingDataController!.stream.listen(_updateWaveform);
 
     await _dataStreamer.startRecorder(
       toStream: _recordingDataController!.sink,
@@ -212,7 +253,6 @@ class _RecordPageState extends State<RecordPage> {
     _startAutoStopTimer();
   }
 
-  // 🕒 Automatically stops recording after the defined duration
   void _startAutoStopTimer() {
     _recordingTimer?.cancel();
     _recordingTimer = Timer(
@@ -223,7 +263,6 @@ class _RecordPageState extends State<RecordPage> {
     );
   }
 
-
   Future<void> _stopRecording() async {
     final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
     LatencyDebug.resetSession(sessionId);
@@ -233,8 +272,6 @@ class _RecordPageState extends State<RecordPage> {
 
     await _dataStreamer.stopRecorder();
     final path = await _fileRecorder.stop();
-    LatencyDebug.mark("🎙 Stop", "File saved at $path");
-
     if (path == null) return;
 
     _dataSubscription?.cancel();
@@ -248,19 +285,23 @@ class _RecordPageState extends State<RecordPage> {
       _isProcessing = true;
     });
 
-    final aiResult = await _tfliteService.runInference(filePath: path);
-    final melPng = await _tfliteService.generateMelImageBytes(path);
+    final aiResult =
+        await _tfliteService.runInference(filePath: path, session: sessionId);
+    final melPng =
+        await _tfliteService.generateMelImageBytes(path, session: sessionId);
 
     if (!mounted) return;
     setState(() => _isProcessing = false);
 
     await _handleRecordingSave(path, aiResult, melPng);
-    LatencyDebug.end("🎙 Stop", "Recording + postprocessing complete");
-  } 
+    LatencyDebug.end("🎙 Stop", "Recording + postprocessing complete", sessionId);
+  }
+
+  // ... (no changes below except existing save logic) ...
 
   Future<void> _handleRecordingSave(
       String tempPath, Map<String, dynamic>? aiResult, Uint8List? melPng) async {
-      LatencyDebug.start("📦 Save", "Begin saving & DB pipeline");
+    LatencyDebug.start("📦 Save", "Begin saving & DB pipeline");
     try {
       Map<String, dynamic>? patient = _currentPatient;
       if (patient == null) {
@@ -271,25 +312,27 @@ class _RecordPageState extends State<RecordPage> {
 
       final patientId = patient['patient_id'] ?? patient['id'];
       String? folderPath = patient['folder_path'];
-      
 
       if (folderPath == null || folderPath.isEmpty) {
-        final basePath = await storage.getSavedPath();
-        folderPath = await storage.createPatientFolder(basePath!, patient['name']);
+        final basePath = await storage.getOrCreateBaseFolder();
+        folderPath = await storage.createPatientSubfolders(basePath, patientId);
         await db.updatePatientFolderPath(patientId, folderPath);
       }
 
       await storage.setCurrentPatient(patientId);
       final patientName = patient['name'] ?? 'Unknown';
-      final safeName = patientName.replaceAll(RegExp(r'[^a-zA-Z0-9_ ]'), "_");
+      patientName.replaceAll(RegExp(r'[^a-zA-Z0-9_ ]'), "_");
 
-      final date = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final newFileName = "${safeName}_${patientId}_$date.wav";
-      final newPublicPath = "$folderPath/$newFileName";
+      final formattedId = db.formatPatientId(patientId); // e.g. "CS000012"
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final newFileName = "${formattedId}_$timestamp.wav";
+      final newPublicPath = "$folderPath/Recordings/$newFileName";
 
+      final newFile = File(newPublicPath);
+      await newFile.parent.create(recursive: true); // ✅ Ensure folders exist
+      
       final tempFile = File(tempPath);
       await tempFile.copy(newPublicPath);
-      LatencyDebug.mark("📦 Save", "WAV copied to $newPublicPath");
       await tempFile.delete();
 
       final recordDate = DateTime.now();
@@ -298,7 +341,6 @@ class _RecordPageState extends State<RecordPage> {
         "file_path": newPublicPath,
         "record_date": recordDate.toIso8601String(),
       });
-      LatencyDebug.mark("📦 Save", "Record inserted into heart_sound_records");
 
       if (aiResult != null) {
         await db.insertAnalysis({
@@ -309,33 +351,31 @@ class _RecordPageState extends State<RecordPage> {
           "analysis_date": DateTime.now().toIso8601String(),
         });
       }
-      LatencyDebug.mark("📦 Save", "AI result stored in mitral_valve_analysis");
 
       if (!mounted) return;
-      LatencyDebug.end("📦 Save", "Pipeline finished — report ready for display");
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ReportGeneratedPage(
-            patientId: patientId,
-            patientName: patientName,
-            patientAge: patient?['age'] ?? '-',
-            patientGender: patient?['gender'] ?? '-',
-            filePath: newPublicPath,
-            recordedDate: recordDate,
-            classification: aiResult?['label'] ?? 'Error',
-            probabilities: aiResult?['probabilities'] as Map<String, dynamic>? ?? {},
-            patientBirthday: patient?['birthday']?.toString(),
-            symptoms: patient?['symptoms']?.toString(),
-            melPngBytes: melPng,
-          ),
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => ReportGeneratedPage(
+          patientId: patientId,
+          patientName: patientName,
+          patientAge: patient?['age'] ?? '-',
+          patientGender: patient?['gender'] ?? '-',
+          filePath: newPublicPath,
+          recordedDate: recordDate,
+          classification: aiResult?['label'] ?? 'Error',
+          probabilities:
+              aiResult?['probabilities'] as Map<String, dynamic>? ?? {},
+          patientBirthday: patient?['birthday']?.toString(),
+          symptoms: patient?['symptoms']?.toString(),
+          melPngBytes: melPng,
         ),
-      );
+      ));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Error saving record: $e')));
     }
   }
+
 
   // ✅ Updated _showPatientDialog — allows editing symptoms before recording
 // ✅ Simplified and fixed _showPatientDialog using showDialog (returns proper result)

@@ -1,3 +1,5 @@
+// 📁 lib/pages/login.dart
+import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,12 +18,14 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   bool _showLoginView = true;
+  bool _acceptedTerms = false;
 
   final _loginPinController = TextEditingController();
   String? _selectedPractitioner;
   String? _loginError;
 
   final _registerNameController = TextEditingController();
+  final _registerEmailController = TextEditingController();
   final _registerPinController = TextEditingController();
   String? _registerError;
   String? _selectedQuestion;
@@ -40,6 +44,7 @@ class _LoginPageState extends State<LoginPage> {
   void dispose() {
     _loginPinController.dispose();
     _registerNameController.dispose();
+    _registerEmailController.dispose();
     _registerPinController.dispose();
     _registerAnswerController.dispose();
     super.dispose();
@@ -77,6 +82,9 @@ class _LoginPageState extends State<LoginPage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt("practitioner_id", practitionerId as int);
     await prefs.setString("practitioner_name", practitionerName as String);
+    await prefs.setBool('isLoggedIn', true);
+
+
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const MainNavigation()),
@@ -84,19 +92,26 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+
   Future<void> _register() async {
     setState(() => _registerError = null);
     if (_registerNameController.text.trim().isEmpty ||
+        _registerEmailController.text.trim().isEmpty ||
         _registerPinController.text.isEmpty ||
         _selectedQuestion == null ||
         _registerAnswerController.text.trim().isEmpty) {
       setState(() => _registerError = "Please fill all fields.");
       return;
     }
+    if (!_acceptedTerms) {
+      setState(() => _registerError = "You must agree to the Terms & Conditions.");
+      return;
+    }
     if (_registerPinController.text.length != 6) {
       setState(() => _registerError = "PIN must be 6 digits.");
       return;
     }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -113,22 +128,39 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
     if (confirm != true) return;
+
     final row = {
       'name': _registerNameController.text.trim(),
+      'email': _registerEmailController.text.trim(),
       'pin': _registerPinController.text,
       'security_question': _selectedQuestion,
       'security_answer': _registerAnswerController.text.trim().toLowerCase(),
+      'consent_agreed': _acceptedTerms ? 1 : 0,
     };
     final id = await db.insertPractitioner(row);
     if (id == 0) {
       setState(() => _registerError = "A practitioner with this name already exists.");
       return;
     }
+
     await _loadPractitioners();
     _registerNameController.clear();
+    _registerEmailController.clear();
     _registerPinController.clear();
     _registerAnswerController.clear();
-    setState(() => _selectedQuestion = null);
+    setState(() {
+      _selectedQuestion = null;
+      _acceptedTerms = false;
+    });
+
+    // ✅ Initialize practitioner folder (avoids "unknown" folder)
+    final storage = StorageService();
+    await storage.setPractitionerInfo(
+      _registerNameController.text.trim(),
+      _registerEmailController.text.trim(),
+    );
+    await storage.ensureBaseFolder();
+
     _toggleView();
     _showMessage("Registration successful! You can now log in.");
   }
@@ -155,7 +187,6 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        // ✅ NEW: Gradient background to match your new design
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -174,26 +205,25 @@ class _LoginPageState extends State<LoginPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // ✅ NEW: Logo uses its original colors
-                  Image.asset(
-                    'assets/images/app_logo.png',
-                    height: 120,
-                  ),
+                  Image.asset('assets/images/app_logo.png', height: 120),
                   const SizedBox(height: 16),
-                  // ✅ NEW: Text uses the primary app color
-                  const Text("CardioScope",
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.deep,
-                        letterSpacing: 0.5,
-                      )),
+                  const Text(
+                    "CardioScope",
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.deep,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
                   const SizedBox(height: 8),
-                  Text("AI-Powered Heart Sound Analysis",
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: AppColors.deep.withValues(alpha: 0.7),
-                      )),
+                  Text(
+                    "AI-Powered Heart Sound Analysis",
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: AppColors.deep.withValues(alpha: 0.7),
+                    ),
+                  ),
                   const SizedBox(height: 40),
                   Material(
                     elevation: 8,
@@ -201,18 +231,17 @@ class _LoginPageState extends State<LoginPage> {
                     shadowColor: Colors.black38,
                     child: Container(
                       decoration: BoxDecoration(
-                          color: Theme.of(context).cardColor,
-                          borderRadius: BorderRadius.circular(24)),
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(24),
+                      ),
                       child: Padding(
                         padding: const EdgeInsets.all(24.0),
                         child: AnimatedSwitcher(
                           duration: const Duration(milliseconds: 300),
-                          transitionBuilder: (child, animation) {
-                            return FadeTransition(opacity: animation, child: child);
-                          },
-                          child: _showLoginView
-                              ? _buildLoginView()
-                              : _buildRegisterView(),
+                          transitionBuilder: (child, animation) =>
+                              FadeTransition(opacity: animation, child: child),
+                          child:
+                              _showLoginView ? _buildLoginView() : _buildRegisterView(),
                         ),
                       ),
                     ),
@@ -232,10 +261,12 @@ class _LoginPageState extends State<LoginPage> {
       children: [
         DropdownButtonFormField<String>(
           initialValue: _selectedPractitioner,
-          items: practitioners.map((p) => DropdownMenuItem<String>(
-                value: p['name'] as String,
-                child: Text(p['name'] as String),
-              )).toList(),
+          items: practitioners
+              .map((p) => DropdownMenuItem<String>(
+                    value: p['name'] as String,
+                    child: Text(p['name'] as String),
+                  ))
+              .toList(),
           onChanged: (val) => setState(() => _selectedPractitioner = val),
           decoration: _inputDecoration("Select Profile", Icons.person_outline),
           hint: const Text("Select your profile"),
@@ -259,9 +290,8 @@ class _LoginPageState extends State<LoginPage> {
           alignment: Alignment.centerRight,
           child: TextButton(
             onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ForgotPinPage()),
-              );
+              Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const ForgotPinPage()));
             },
             child: const Text("Forgot PIN?"),
           ),
@@ -285,6 +315,12 @@ class _LoginPageState extends State<LoginPage> {
         TextField(
           controller: _registerNameController,
           decoration: _inputDecoration("Full Name", Icons.badge_outlined),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _registerEmailController,
+          keyboardType: TextInputType.emailAddress,
+          decoration: _inputDecoration("Email Address", Icons.email_outlined),
         ),
         const SizedBox(height: 16),
         TextField(
@@ -314,11 +350,41 @@ class _LoginPageState extends State<LoginPage> {
           controller: _registerAnswerController,
           decoration: _inputDecoration("Answer", Icons.edit),
         ),
+        const SizedBox(height: 20),
+
+        // ✅ Terms & Conditions Section
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade400),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const SizedBox(
+            height: 100,
+            child: SingleChildScrollView(
+              child: Text(
+                '''By registering, you confirm that:
+1. You are a licensed or supervised medical practitioner or student using CardioScope for academic, diagnostic, or research purposes.
+2. You agree to comply with the Data Privacy Act of 2012 (RA 10173) and ensure all patient data remains confidential.
+3. You consent to the secure, local storage of data on this device only.
+4. You will ensure patient consent is obtained before every recording.''',
+                style: TextStyle(fontSize: 13, height: 1.4),
+              ),
+            ),
+          ),
+        ),
+        CheckboxListTile(
+          title: const Text("I have read and agree to the Terms & Conditions"),
+          value: _acceptedTerms,
+          onChanged: (v) => setState(() => _acceptedTerms = v ?? false),
+          controlAffinity: ListTileControlAffinity.leading,
+        ),
+
         if (_registerError != null) ...[
           const SizedBox(height: 8),
           Text(_registerError!, style: const TextStyle(color: Colors.red)),
         ],
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         _buildAuthButton(label: "Register", onPressed: _register),
         const SizedBox(height: 24),
         _buildToggleRow(
@@ -342,7 +408,8 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  Widget _buildAuthButton({required String label, required VoidCallback onPressed}) {
+  Widget _buildAuthButton(
+      {required String label, required VoidCallback onPressed}) {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
@@ -355,19 +422,25 @@ class _LoginPageState extends State<LoginPage> {
             borderRadius: BorderRadius.circular(12),
           ),
         ),
-        child: Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        child: Text(label,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       ),
     );
   }
 
-  Widget _buildToggleRow({required String label, required String buttonLabel, required VoidCallback onPressed}) {
+  Widget _buildToggleRow(
+      {required String label,
+      required String buttonLabel,
+      required VoidCallback onPressed}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Text(label, style: TextStyle(color: Colors.grey.shade600)),
         TextButton(
           onPressed: onPressed,
-          child: Text(buttonLabel, style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+          child: Text(buttonLabel,
+              style: const TextStyle(
+                  color: AppColors.primary, fontWeight: FontWeight.bold)),
         )
       ],
     );

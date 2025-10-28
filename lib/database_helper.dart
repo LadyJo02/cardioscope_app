@@ -1,4 +1,4 @@
-// lib/database_helper.dart
+// 📁 lib/database_helper.dart
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -8,7 +8,7 @@ import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
   static const _databaseName = "cardioscope.db";
-  static const _databaseVersion = 7; // bumped for release
+  static const _databaseVersion = 8; // ✅ bumped version for consent + email
 
   DatabaseHelper._privateConstructor();
   static final DatabaseHelper instance = DatabaseHelper._privateConstructor();
@@ -30,15 +30,17 @@ class DatabaseHelper {
     );
   }
 
-  // 🧱 Create all tables from scratch for new installs
+  // 🧱 Initial DB schema for new installs
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
       CREATE TABLE practitioners (
         practitioner_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
+        email TEXT,
         pin TEXT NOT NULL,
         security_question TEXT,
-        security_answer TEXT
+        security_answer TEXT,
+        consent_agreed BOOLEAN DEFAULT 0
       );
     ''');
 
@@ -50,7 +52,7 @@ class DatabaseHelper {
         birthday TEXT,
         age INTEGER,
         gender TEXT,
-        symptoms TEXT,           -- ✅ included for new installs
+        symptoms TEXT,
         folder_path TEXT,
         FOREIGN KEY (practitioner_id)
           REFERENCES practitioners (practitioner_id)
@@ -91,25 +93,42 @@ class DatabaseHelper {
     ''');
   }
 
-  // ♻️ Auto-upgrade for existing installs
+  // ♻️ Upgrade logic for existing installs
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    // 1️⃣ v2 - Add security question
     if (oldVersion < 2) {
       await db.execute("ALTER TABLE practitioners ADD COLUMN security_question TEXT;");
       await db.execute("ALTER TABLE practitioners ADD COLUMN security_answer TEXT;");
     }
 
+    // 2️⃣ v3 - Add birthday and folder_path
     if (oldVersion < 3) {
       await db.execute("ALTER TABLE patients ADD COLUMN birthday TEXT;");
       await db.execute("ALTER TABLE patients ADD COLUMN folder_path TEXT;");
     }
 
-    // ✅ Smart patch: add symptoms only if missing
+    // 3️⃣ v7 - Add symptoms column to patients if missing
     if (oldVersion < 7) {
       final cols = await db.rawQuery("PRAGMA table_info(patients);");
       final names = cols.map((c) => c['name'] as String).toList();
       if (!names.contains('symptoms')) {
         await db.execute("ALTER TABLE patients ADD COLUMN symptoms TEXT;");
         debugPrint("✅ Added 'symptoms' column to patients table.");
+      }
+    }
+
+    // 4️⃣ v8 - Add email + consent_agreed to practitioners
+    if (oldVersion < 8) {
+      final cols = await db.rawQuery("PRAGMA table_info(practitioners);");
+      final colNames = cols.map((c) => c['name'] as String).toList();
+
+      if (!colNames.contains('email')) {
+        await db.execute("ALTER TABLE practitioners ADD COLUMN email TEXT;");
+        debugPrint("✅ Added 'email' column to practitioners table.");
+      }
+      if (!colNames.contains('consent_agreed')) {
+        await db.execute("ALTER TABLE practitioners ADD COLUMN consent_agreed BOOLEAN DEFAULT 0;");
+        debugPrint("✅ Added 'consent_agreed' column to practitioners table.");
       }
     }
 
@@ -272,39 +291,38 @@ class DatabaseHelper {
   }
 
   // ---------------- REPORTS ----------------
-Future<List<Map<String, dynamic>>> getAllReports(
-  int practitionerId, {
-  DateTime? startDate,
-  DateTime? endDate,
-}) async {
-  final db = await database;
+  Future<List<Map<String, dynamic>>> getAllReports(
+    int practitionerId, {
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    final db = await database;
 
-  String whereClause = 'p.practitioner_id = ?';
-  List<Object> whereArgs = [practitionerId];
+    String whereClause = 'p.practitioner_id = ?';
+    List<Object> whereArgs = [practitionerId];
 
-  if (startDate != null) {
-    whereClause += ' AND r.record_date >= ?';
-    whereArgs.add(DateFormat('yyyy-MM-dd').format(startDate));
+    if (startDate != null) {
+      whereClause += ' AND r.record_date >= ?';
+      whereArgs.add(DateFormat('yyyy-MM-dd').format(startDate));
+    }
+    if (endDate != null) {
+      whereClause += ' AND r.record_date < ?';
+      whereArgs
+          .add(DateFormat('yyyy-MM-dd').format(endDate.add(const Duration(days: 1))));
+    }
+
+    return db.rawQuery('''
+      SELECT 
+        p.patient_id, p.name, p.birthday, p.age, p.gender, p.symptoms, p.folder_path,
+        r.record_id, r.file_path, r.record_date,
+        a.analysis_id, a.diagnosis, a.probabilities, a.analysis_date
+      FROM patients p
+      JOIN heart_sound_records r ON p.patient_id = r.patient_id
+      LEFT JOIN mitral_valve_analysis a ON r.record_id = a.record_id
+      WHERE $whereClause
+      ORDER BY r.record_date DESC;
+    ''', whereArgs);
   }
-  if (endDate != null) {
-    whereClause += ' AND r.record_date < ?';
-    whereArgs.add(
-        DateFormat('yyyy-MM-dd').format(endDate.add(const Duration(days: 1))));
-  }
-
-  return db.rawQuery('''
-    SELECT 
-      p.patient_id, p.name, p.birthday, p.age, p.gender, p.symptoms, p.folder_path,
-      r.record_id, r.file_path, r.record_date,
-      a.analysis_id, a.diagnosis, a.probabilities, a.analysis_date
-    FROM patients p
-    JOIN heart_sound_records r ON p.patient_id = r.patient_id
-    LEFT JOIN mitral_valve_analysis a ON r.record_id = a.record_id
-    WHERE $whereClause
-    ORDER BY r.record_date DESC;
-  ''', whereArgs);
-}
-
 
   Future<List<Map<String, dynamic>>> getAllReportsWithPatients(
       int practitionerId) async {

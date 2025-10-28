@@ -19,7 +19,7 @@ class AppColors {
 
   // ✅ Utility
   static const Color warning = Color(0xFFA03232);
-  static const Color success = Color(0xFF34B233);
+  static const Color success = Color(0xFF2E7D32);
 
   // 📝 Text
   static const Color textPrimary = Color(0xFF172737);

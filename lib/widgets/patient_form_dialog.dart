@@ -101,6 +101,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
   final birthday = _birthdayController.text.trim();
   final gender = _selectedGender ?? 'Unspecified';
   final age = _selectedDate != null ? _calculateAge(_selectedDate!) : null;
+  final symptoms = _symptomsController.text.trim();
 
   final basePath = await storage.getSavedPath();
   if (basePath == null || basePath.isEmpty) {
@@ -111,23 +112,24 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
     return;
   }
 
-  final patientFolder = await storage.createPatientFolder(basePath, name);
+
   final prefs = await SharedPreferences.getInstance();
   final practitionerId = prefs.getInt('practitioner_id') ?? 1;
 
+  // --- Build patient data map ---
   final patientData = {
     'name': name,
     'birthday': birthday,
     'age': age,
     'gender': gender,
-    'symptoms': _symptomsController.text.trim(),
-    'folder_path': patientFolder,
+    'symptoms': symptoms,
   };
 
   // ✅ If patient exists, update their info — including symptoms
   final existing = await db.getPatientDetails(name);
-  late int patientId;
+  int patientId;
   if (existing != null) {
+    // Update existing patient
     await db.database.then((conn) {
       conn.update(
         'patients',
@@ -137,19 +139,25 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
       );
     });
     patientId = existing['patient_id'];
+    developer.log("🔄 Updated existing patient ID: $patientId");
   } else {
+    // Create new patient
     patientId = await db.findOrCreatePatient(practitionerId, patientData);
+    developer.log("🆕 Created new patient ID: $patientId");
   }
 
+  // --- Create subfolders for patient ---
+  final patientFolder = await storage.createPatientSubfolders(basePath, patientId);
   await db.updatePatientFolderPath(patientId, patientFolder);
   await storage.setCurrentPatient(patientId);
 
-  developer.log("✅ Returning patient data for $name (ID: $patientId)");
+  developer.log("✅ Patient folder created at: $patientFolder");
   if (!mounted) return;
 
   Navigator.of(context).pop({
     'patient_id': patientId,
     ...patientData,
+    'folder_path': patientFolder,
   });
 }
 

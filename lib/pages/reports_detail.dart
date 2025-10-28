@@ -1,3 +1,4 @@
+// lib\pages\reports_detail.dart
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -206,7 +207,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("✅ Re-analysis complete.")),
+        const SnackBar(content: Text("Re-analysis complete.")),
       );
     } catch (e) {
       if (!mounted) return;
@@ -245,6 +246,11 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       return;
     }
 
+    final practitioner = await DatabaseHelper.instance
+    .getPractitionerByName(_practitionerName);
+    final consent = practitioner?['consent_agreed'] == 1;
+    final email = practitioner?['email'] ?? '';   
+
     await PdfExporter.exportSingleReport(
       report: {
         'patient_id': _localReport['patient_id'],
@@ -257,8 +263,12 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
         'record_date': _localReport['record_date'],
         'diagnosis': _currentDiagnosis,
         'probabilities': _currentProbabilities,
+        'practitioner_email': email,
+        'consent_agreed': consent,
+        'mel_png': _melPng, 
       },
       practitionerName: _practitionerName,
+      practitionerConsent: consent,
     );
   }
 

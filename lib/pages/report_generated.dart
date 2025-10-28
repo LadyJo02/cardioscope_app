@@ -1,7 +1,9 @@
+// lib\pages\report_generated.dart
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cardioscope_app/services/tflite_service.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -290,6 +292,22 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
+
+          final practitioner = await DatabaseHelper.instance
+              .getPractitionerByName(_practitionerName);
+          final consent = practitioner?['consent_agreed'] == 1;
+          final email = practitioner?['email'] ?? '';
+          
+          // 🧠 Force-generate spectrogram if null
+          Uint8List? melBytes = widget.melPngBytes;
+          if (melBytes == null && File(widget.filePath).existsSync()) {
+            try {
+              melBytes = await TfliteService().generateMelImageBytes(widget.filePath);
+            } catch (e) {
+              debugPrint("⚠️ Could not generate spectrogram: $e");
+            }
+          }
+          
           await PdfExporter.exportSingleReport(
             report: {
               'patient_id': widget.patientId,
@@ -302,9 +320,12 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
               'record_date': widget.recordedDate.toIso8601String(),
               'diagnosis': widget.classification,
               'probabilities': widget.probabilities,
-              'mel_png': widget.melPngBytes,
+              'practitioner_email': email,
+              'consent_agreed': consent,
+              'mel_png': melBytes,
             },
             practitionerName: _practitionerName,
+            practitionerConsent: consent,
           );
         },
         backgroundColor: AppColors.primary,

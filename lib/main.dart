@@ -1,3 +1,6 @@
+// lib\main.dart
+import 'dart:io';
+
 import 'package:cardioscope_app/pages/onboarding_page.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/app_theme.dart';
@@ -22,7 +25,14 @@ Future<void> main() async {
   await [
     Permission.microphone,
     Permission.storage,
+    if (Platform.isAndroid && Platform.version.compareTo("30") >= 0)
+      Permission.manageExternalStorage,
   ].request();
+
+  // ✅ Ensure CardioScope base folder exists
+  final storageService = StorageService();
+  await storageService.ensureBaseFolder();
+
 
   final prefs = await SharedPreferences.getInstance();
   final hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
@@ -138,83 +148,26 @@ class _MainNavigationState extends State<MainNavigation> {
     final storageService = StorageService();
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
-    final savedPath = await storageService.getSavedPath();
-
-    if (savedPath == null || savedPath.isEmpty) {
-      if (!mounted) return;
-
-      final proceed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => _buildDialog(
-          icon: Icons.folder_open_rounded,
-          iconColor: AppColors.deep,
-          title: 'Select Save Folder',
-          message:
-              'Please select a folder to save your recordings (e.g., Downloads).',
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Select Folder'),
-            ),
-          ],
+    // ✅ Automatically ensure base folder exists (no manual folder picking)
+    try {
+      final basePath = await storageService.getOrCreateBaseFolder();
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Text('Save location: $basePath'),
+          duration: const Duration(seconds: 2),
         ),
       );
 
-      if (proceed != true) return;
-
-      final pickedPath = await storageService.pickFolder();
-      if (pickedPath == null || pickedPath.isEmpty) {
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('Folder selection cancelled.')),
-        );
-        return;
-      }
-
+      _navigateToRecordPage();
+    } catch (e) {
       scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text('Save location set: $pickedPath'),
+          content: Text('Storage access error: $e'),
+          backgroundColor: AppColors.warning,
           duration: const Duration(seconds: 3),
         ),
       );
-      _navigateToRecordPage();
-    } else {
-      _navigateToRecordPage();
     }
-  }
-
-  Widget _buildDialog({
-    required IconData icon,
-    required Color iconColor,
-    required String title,
-    required String message,
-    required List<Widget> actions,
-  }) {
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      title: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: iconColor, size: 28),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
-            ),
-          ),
-        ],
-      ),
-      content: Text(message, style: const TextStyle(fontSize: 15)),
-      actions: actions,
-    );
   }
 
   Future<void> _navigateToRecordPage() async {

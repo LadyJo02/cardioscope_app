@@ -22,7 +22,7 @@ class TfliteService {
   final String _preprocModelPath = "assets/models/preprocess_mel.tflite";
   final String _mainModelPath = "assets/models/tcn_snn_full.tflite";
 
-  static const List<String> _labels = ["MR", "MS", "MVP", "N"];
+  static const List<String> _labels = ["N", "MR", "MS", "MVP"];
   static const int _expectedLength = 20000;
 
   bool get isPreprocReady => _preprocInterpreter != null;

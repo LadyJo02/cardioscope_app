@@ -2,11 +2,11 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/utils/latency_debug.dart';
 import 'package:excel/excel.dart';
 import 'package:flutter/material.dart' show DateTimeRange;
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../database_helper.dart';
@@ -67,12 +67,15 @@ class ExcelExporter {
     }
     LatencyDebug.mark("📊 Excel", "All rows added");
 
-    final dir = await getTemporaryDirectory();
+    final storage = StorageService();
+    final basePath = await storage.getOrCreateBaseFolder();
+    final dirPath = await storage.createReportsFolder(basePath);
+
     final startDate = DateFormat('yyyy-MM-dd').format(dateRange.start);
     final endDate = DateFormat('yyyy-MM-dd').format(dateRange.end);
     final filename = "CardioScope_Export_${practitionerName.replaceAll(' ', '_')}_${startDate}_to_$endDate.xlsx";
     
-    final file = File("${dir.path}/$filename");
+    final file = File("$dirPath/$filename");
 
     final fileBytes = excel.save();
     if (fileBytes != null) {

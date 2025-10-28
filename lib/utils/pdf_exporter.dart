@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:cardioscope_app/utils/latency_debug.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
@@ -25,36 +26,58 @@ class PdfExporter {
   static Future<void> exportSingleReport({
     required Map<String, dynamic> report,
     required String practitionerName,
+    bool practitionerConsent = false,
   }) async {
+    LatencyDebug.start("📄 PDF", "Generating single report for ${report['name'] ?? 'Unknown'}");
+
     final pdf = pw.Document();
     final logo = pw.MemoryImage(
       (await rootBundle.load('assets/images/app_logo.png')).buffer.asUint8List(),
     );
     final now = _dateTimeFormat.format(DateTime.now());
 
-    final melSpecImage = await _generateMelSpectrogramImage(report['file_path']);
+    // ✅ STEP 1 — use mel_png bytes if already provided
+    pw.ImageProvider? melSpecImage;
+    if (report['mel_png'] != null && report['mel_png'] is Uint8List) {
+      melSpecImage = pw.MemoryImage(report['mel_png']);
+    } else {
+      melSpecImage = await _generateMelSpectrogramImage(report['file_path']);
+    }
+
+    // ✅ STEP 2 — load waveform
     final waveformSamples = await _loadWaveformSamples(report['file_path']);
 
-    pdf.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(32),
-        build: (context) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            _buildHeader(practitionerName, now, logo),
-            pw.SizedBox(height: 12),
-            _buildReportContent(
-              report: report,
-              melImage: melSpecImage,
-              waveformSamples: waveformSamples,
-            ),
-            pw.Spacer(),
-            _buildFooter(context),
-          ],
+    // ✅ STEP 3 — normalize probabilities
+    if (report['probabilities'] is Map<String, dynamic>) {
+      report['probabilities'] = jsonEncode(report['probabilities']);
+    }
+
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              _buildHeader(
+                practitionerName, 
+                now, 
+                logo,
+                practitionerEmail: report['practitioner_email'] ?? '',
+                practitionerConsent: practitionerConsent,
+              ),
+              pw.SizedBox(height: 12),
+              _buildReportContent(
+                  report: report,
+                  melImage: melSpecImage,
+                  waveformSamples: waveformSamples,
+                ),
+              pw.Spacer(),
+              _buildFooter(context),
+            ],
+          ),
         ),
-      ),
-    );
+      );
 
     final dir = await getTemporaryDirectory();
     final file = File(
@@ -65,13 +88,16 @@ class PdfExporter {
   }
 
   // --------------------------------------------------------------------------
-  // BATCH REPORTS
+  // ✅ BATCH REPORTS 
   // --------------------------------------------------------------------------
   static Future<void> exportBatchReports({
     required List<Map<String, dynamic>> reports,
     required String practitionerName,
+    bool practitionerConsent = false,
     required DateTimeRange dateRange,
   }) async {
+    LatencyDebug.start("📄 PDF-Batch", "Batch export for ${reports.length} reports");
+
     final pdf = pw.Document();
     final logo = pw.MemoryImage(
       (await rootBundle.load('assets/images/app_logo.png')).buffer.asUint8List(),
@@ -85,11 +111,17 @@ class PdfExporter {
       pdf.addPage(
         pw.Page(
           pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(32),
+          margin: const pw.EdgeInsets.symmetric(horizontal: 32, vertical: 24),
           build: (context) => pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              _buildHeader(practitionerName, now, logo),
+              _buildHeader(
+                practitionerName, 
+                now, 
+                logo,
+                practitionerEmail: report['practitioner_email'] ?? '',
+                practitionerConsent: practitionerConsent,
+                ),
               pw.SizedBox(height: 12),
               _buildReportContent(
                 report: report,
@@ -104,13 +136,18 @@ class PdfExporter {
       );
     }
 
+    LatencyDebug.mark("📄 PDF-Batch", "All ${reports.length} pages built");
+
     final dir = await getTemporaryDirectory();
     final startDate = DateFormat('yyyy-MM-dd').format(dateRange.start);
     final endDate = DateFormat('yyyy-MM-dd').format(dateRange.end);
     final filename =
         "CardioScope_Batch_${practitionerName.replaceAll(' ', '_')}_${startDate}_to_$endDate.pdf";
+
     final file = File("${dir.path}/$filename");
     await file.writeAsBytes(await pdf.save());
+
+    LatencyDebug.end("📄 PDF-Batch", "Batch PDF ready: ${file.path}");
     await Share.shareXFiles([XFile(file.path)], text: "CardioScope Batch Reports");
   }
 
@@ -120,8 +157,18 @@ class PdfExporter {
   static pw.Widget _buildHeader(
     String practitionerName,
     String now,
-    pw.MemoryImage logo,
-  ) {
+    pw.MemoryImage logo, {
+    String? practitionerEmail,
+    bool practitionerConsent = false,
+  }) {
+    final consentText = practitionerConsent
+        ? "Patient Consent: Verified"
+        : "Patient Consent: Not Verified";
+
+    final consentColor = practitionerConsent
+        ? const PdfColor.fromInt(0xFF2E7D32)
+        : const PdfColor.fromInt(0xFFA03232);
+
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -140,8 +187,20 @@ class PdfExporter {
             pw.SizedBox(height: 6),
             pw.Text("Generated by: $practitionerName",
                 style: const pw.TextStyle(color: PdfColors.grey700)),
+            if (practitionerEmail != null && practitionerEmail.isNotEmpty)
+              pw.Text("Email: $practitionerEmail",
+                  style: const pw.TextStyle(color: PdfColors.grey700)),
             pw.Text("Date Generated: $now",
                 style: const pw.TextStyle(color: PdfColors.grey700)),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              consentText,
+              style: pw.TextStyle(
+                color: consentColor,
+                fontSize: 10,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
           ],
         ),
         pw.SizedBox(height: 65, width: 65, child: pw.Image(logo)),
@@ -194,7 +253,6 @@ class PdfExporter {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.SizedBox(height: 6),
         _buildSectionHeader("Patient Details"),
         _buildDetailRow("Patient ID:", patientId),
         _buildDetailRow("Name:", report['name'] ?? 'N/A'),
@@ -211,14 +269,13 @@ class PdfExporter {
         pw.Center(
           child: pw.Column(
             children: [
-              // --- Waveform ---
               pw.Container(
                 width: contentWidth,
                 height: 120,
                 margin: const pw.EdgeInsets.only(top: 6, bottom: 8),
                 padding: const pw.EdgeInsets.all(6),
                 decoration: pw.BoxDecoration(
-                  color: const PdfColor.fromInt(0xFFF0F8F4), // pale hospital green
+                  color: const PdfColor.fromInt(0xFFF0F8F4),
                   borderRadius: pw.BorderRadius.circular(5),
                   border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
                 ),
@@ -226,38 +283,33 @@ class PdfExporter {
                     ? _waveformCanvas(waveformSamples)
                     : _waveformEmptyHint(),
               ),
-              // --- Mel Spectrogram ---
               pw.Container(
                 width: contentWidth,
                 height: 160,
-                margin: const pw.EdgeInsets.only(top: 6),
                 decoration: pw.BoxDecoration(
                   border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
                   borderRadius: pw.BorderRadius.circular(5),
-                  color: PdfColors.white,
                 ),
                 child: melImage != null
-                          ? pw.ClipRRect(
-                              horizontalRadius: 5,
-                              verticalRadius: 5,
-                              child: pw.Image(
-                                melImage,
-                                fit: pw.BoxFit.fill,             // ✅ full visible, not cropped
-                                alignment: pw.Alignment.topCenter, // ✅ start from top
-                              ),
-                            )
+                    ? pw.ClipRRect(
+                        horizontalRadius: 5,
+                        verticalRadius: 5,
+                        child: pw.Image(
+                          melImage,
+                          fit: pw.BoxFit.fill,
+                          alignment: pw.Alignment.topCenter,
+                        ),
+                      )
                     : pw.Center(
                         child: pw.Text("Spectrogram unavailable",
-                            style:
-                                const pw.TextStyle(color: PdfColors.grey)),
-                      ),
+                            style: const pw.TextStyle(color: PdfColors.grey))),
               ),
             ],
           ),
         ),
         pw.SizedBox(height: 8),
         _buildSectionHeader("AI Analysis"),
-        _buildDetailRow("Classification:", report['diagnosis'] ?? 'N/A'),
+        _buildDetailRow("Classification:",report['diagnosis'] ?? 'N/A'),
         if (probs.isNotEmpty) ...[
           pw.SizedBox(height: 4),
           pw.Text("Detailed Probabilities:",
@@ -304,7 +356,7 @@ class PdfExporter {
   }
 
   // --------------------------------------------------------------------------
-  // WAVEFORM
+  // WAVEFORM + LOAD + MEL GENERATION (same)
   // --------------------------------------------------------------------------
   static pw.Widget _waveformCanvas(List<double> samples) {
     return pw.CustomPaint(
@@ -313,7 +365,6 @@ class PdfExporter {
         final h = size.y;
         final midY = h / 2;
         if (samples.isEmpty) return;
-
         final maxAmp = samples.map((e) => e.abs()).reduce(max);
         final normalized =
             maxAmp > 0 ? samples.map((v) => v / maxAmp).toList() : samples;
@@ -321,17 +372,14 @@ class PdfExporter {
         final reduced = [
           for (int i = 0; i < normalized.length; i += downsample) normalized[i]
         ];
-
         if (reduced.length < 2) return;
         final stepX = w / (reduced.length - 1);
-
         canvas
           ..setStrokeColor(const PdfColor.fromInt(0xFFB2DFDB))
           ..setLineWidth(0.5)
           ..moveTo(0, midY)
           ..lineTo(w, midY)
           ..strokePath();
-
         canvas
           ..setStrokeColor(const PdfColor.fromInt(0xFF00796B))
           ..setLineWidth(1.0);
@@ -353,9 +401,6 @@ class PdfExporter {
             style: const pw.TextStyle(color: PdfColors.grey)),
       );
 
-  // --------------------------------------------------------------------------
-  // LOAD WAVEFORM
-  // --------------------------------------------------------------------------
   static Future<List<double>?> _loadWaveformSamples(String? path) async {
     if (path == null) return null;
     final file = File(path);
@@ -371,23 +416,15 @@ class PdfExporter {
     return samples;
   }
 
-  // --------------------------------------------------------------------------
-  // MEL SPECTROGRAM (RGB safe + bright)
-  // --------------------------------------------------------------------------
   static Future<pw.ImageProvider?> _generateMelSpectrogramImage(String? wavPath) async {
     if (wavPath == null) return null;
     try {
-      // 🧠 Use the same preprocessed PNG generated by TFLite
       final melBytes = await TfliteService().generateMelImageBytes(
         wavPath,
-        forPdf: true, // uses gamma=0.78 → identical to in-app display
+        forPdf: true,
       );
       if (melBytes == null) return null;
-
-      // ✅ Embed directly — no extra color correction needed
-      return pw.MemoryImage(
-        melBytes,// keep high DPI for crisp print
-      );
+      return pw.MemoryImage(melBytes);
     } catch (e) {
       debugPrint("❌ Spectrogram load error: $e");
       return null;
