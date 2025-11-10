@@ -6,7 +6,6 @@ import 'package:cardioscope_app/utils/latency_debug.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
-
 /// 🎨 Accurate Inferno-Blue colormap version (matches matplotlib -1→4 range)
 /// Handles safe waveform trimming/padding to prevent RangeErrors.
 /// - preprocess_mel.tflite → generates mel-spectrogram (colored)
@@ -22,11 +21,12 @@ class TfliteService {
   final String _preprocModelPath = "assets/models/preprocess_mel.tflite";
   final String _mainModelPath = "assets/models/tcn_snn_full.tflite";
 
-  static const List<String> _labels = ["N", "MR", "MS", "MVP"];
+  static const List<String> _labels = ["N", "MVP", "MR", "MS"];
   static const int _expectedLength = 20000;
 
   bool get isPreprocReady => _preprocInterpreter != null;
   bool get isMainReady => _mainInterpreter != null;
+  bool get isLoaded => isPreprocReady && isMainReady;
 
   Future<void> loadModel() async => loadModels();
 

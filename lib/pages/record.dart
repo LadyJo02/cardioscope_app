@@ -1,5 +1,6 @@
-// 📁 lib/pages/record.dart
-// ✅ Updated with Patient Consent Confirmation before recording
+// lib/pages/record.dart
+// ✅ Secure internal + anonymized backup + consent + latency trace + 5s rule
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -12,19 +13,21 @@ import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/services/tflite_service.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/latency_debug.dart';
-import 'package:cardioscope_app/widgets/custom_button.dart';
 import 'package:cardioscope_app/widgets/patient_form_dialog.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:intl/intl.dart';
-import 'package:record/record.dart' as file_recorder;
+import 'package:permission_handler/permission_handler.dart';
+import 'package:record/record.dart' as record_lib;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../database_helper.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
-
   @override
   State<RecordPage> createState() => _RecordPageState();
 }
@@ -35,17 +38,17 @@ class _RecordPageState extends State<RecordPage> {
   static const double _smoothAlpha = 0.15;
 
   final FlutterSoundRecorder _dataStreamer = FlutterSoundRecorder();
-  final file_recorder.AudioRecorder _fileRecorder = file_recorder.AudioRecorder();
+  final record_lib.AudioRecorder _fileRecorder = record_lib.AudioRecorder();
   final TfliteService _tfliteService = TfliteService();
   final db = DatabaseHelper.instance;
   final storage = StorageService();
 
   StreamController<Uint8List>? _recordingDataController;
   StreamSubscription? _dataSubscription;
+  StreamSubscription<Set<AudioDevice>>? _devicesSubscription;
+
   bool _isRecording = false;
   bool _isProcessing = false;
-
-  StreamSubscription<Set<AudioDevice>>? _devicesSubscription;
   bool _isUsbMicConnected = false;
 
   List<FlSpot> _spots = [];
@@ -74,20 +77,17 @@ class _RecordPageState extends State<RecordPage> {
     final patientId = await storage.getCurrentPatient();
     if (patientId != null) {
       final patient = await db.getPatientById(patientId);
-      if (patient != null && mounted) setState(() => _currentPatient = patient);
+      if (mounted) setState(() => _currentPatient = patient);
     }
   }
 
   Future<void> _initAudioSession() async {
-    LatencyDebug.start("🔌 TXRX", "Initializing USB-C audio session");
     final session = await AudioSession.instance;
     await session.configure(const AudioSessionConfiguration.speech());
-    LatencyDebug.mark("🔌 TXRX", "AudioSession configured");
     _devicesSubscription = session.devicesStream.listen((devices) {
       _checkConnectedDevices(devices.toList());
     });
     _checkConnectedDevices((await session.getDevices()).toList());
-    LatencyDebug.end("🔌 TXRX", "Session + device stream initialized");
   }
 
   void _checkConnectedDevices(List<AudioDevice> devices) {
@@ -102,19 +102,24 @@ class _RecordPageState extends State<RecordPage> {
       ),
     );
 
+    final changed = _isUsbMicConnected != usbDevice.id.isNotEmpty;
+
     if (mounted) {
-      final wasConnected = _isUsbMicConnected;
       setState(() => _isUsbMicConnected = usbDevice.id.isNotEmpty);
 
-      if (_isUsbMicConnected != wasConnected) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(_isUsbMicConnected
-              ? 'CardioScope receiver connected'
-              : 'CardioScope receiver disconnected'),
-          backgroundColor:
-              _isUsbMicConnected ? AppColors.success : AppColors.warning,
-          duration: const Duration(seconds: 2),
-        ));
+      if (changed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _isUsbMicConnected
+                  ? 'CardioScope receiver connected'
+                  : 'CardioScope receiver disconnected',
+            ),
+            backgroundColor:
+                _isUsbMicConnected ? AppColors.success : AppColors.warning,
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
     }
   }
@@ -131,86 +136,154 @@ class _RecordPageState extends State<RecordPage> {
     super.dispose();
   }
 
-  // === MAIN RECORDING LOGIC ===
+  // -------------------------------------------------------------
+  // ✅ Clinical popup for early stop (<5s)
+  Future<bool> _showMinDurationDialog() async {
+    final res = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text("Recording Too Short"),
+        content: const Text(
+          "A full 5-second recording is required to capture complete heart sound cycles for accurate clinical analysis.\n\nDo you want to continue recording or restart?",
+        ),
+        actions: [
+          TextButton(
+            child: const Text("Continue Recording"),
+            onPressed: () => Navigator.pop(context, false),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text("Restart"),
+            onPressed: () => Navigator.pop(context, true),
+          ),
+        ],
+      ),
+    );
+    return res ?? false;
+  }
+  // -------------------------------------------------------------
+
   Future<void> _toggleRecording() async {
     if (_isProcessing) return;
 
-    LatencyDebug.start("🎙 Record", _isRecording ? "Stopping recording" : "User tapped record");
     setState(() => _isProcessing = true);
+    LatencyDebug.start("🎙️ Tap", _isRecording ? "Stopping" : "Starting");
+
+    HapticFeedback.selectionClick();
 
     if (!_isUsbMicConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please connect the CardioScope receiver first.')),
-      );
+      HapticFeedback.heavyImpact();
+      await Future.delayed(const Duration(milliseconds: 60));
+      _toast("Please connect the CardioScope receiver first.");
       setState(() => _isProcessing = false);
       return;
     }
 
     final hasPermission = await _fileRecorder.hasPermission();
     if (!hasPermission) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Microphone permission required.')),
-      );
+      _toast("Microphone permission required.");
+      setState(() => _isProcessing = false);
+      await Future.delayed(const Duration(milliseconds: 600));
+      openAppSettings();
+      return;
+    }
+
+    // ✅ If already recording → user is trying to stop early
+// ✅ If already recording → user is trying to stop early
+if (_isRecording) {
+  // Pause timers + data first
+  _stopTimer();
+  _recordingTimer?.cancel();
+  await _dataStreamer.stopRecorder();
+  await _fileRecorder.pause();
+
+  // Ask user
+  final restart = await _showMinDurationDialog();
+  if (!mounted) return;
+
+  if (restart == false) {
+    // Continue recording
+    await _dataStreamer.startRecorder(
+      toStream: _recordingDataController!.sink,
+      codec: Codec.pcm16,
+      numChannels: 1,
+      sampleRate: 4000,
+    );
+    await _fileRecorder.resume();
+    _startTimer();
+
+    setState(() => _isProcessing = false);
+    return;
+  }
+
+  // User chose restart → discard recording safely
+  await _stopRecording(forceDiscard: true);
+  _stopTimer();
+
+  setState(() {
+    _isProcessing = false;
+    _isRecording = false;
+    _spots.clear();
+    _duration = Duration.zero;
+  });
+
+  _toast("Recording reset — tap again to start", success: true);
+  return;
+}
+
+    // ✅ Ask consent before start
+    final consent = await _showConsentDialog();
+    if (consent != true) {
+      HapticFeedback.vibrate();
+      await Future.delayed(const Duration(milliseconds: 60));
+      _toast("Recording cancelled — patient consent required.");
       setState(() => _isProcessing = false);
       return;
     }
 
-    if (_isRecording) {
-      await _stopRecording();
-    } else {
-      // 🧩 Ask patient consent before recording
-      final consentGiven = await _showConsentDialog();
-      if (!mounted) return;
-      if (consentGiven != true) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Recording cancelled — patient consent required.')));
-        setState(() => _isProcessing = false);
-        return;
-      }
+    // Persist once per session (best-effort)
+try {
+  final prefs = await SharedPreferences.getInstance();
+  final pid = prefs.getInt('practitioner_id');
+  if (pid != null) {
+    await db.updatePractitionerConsent(pid, true);
+  }
+} catch (_) {}
 
-      // ✅ Add this toast before recording begins
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Consent logged.'),
-          backgroundColor: AppColors.success,
-          duration: Duration(seconds: 2),
-        ),
-      );
+    await Future.delayed(const Duration(milliseconds: 120));
+    HapticFeedback.lightImpact();
+    _toast("Consent logged.", success: true);
 
-      await _startRecording();
-    }
-
-
-    if (mounted) setState(() => _isProcessing = false);
+    await _startRecording();
+    LatencyDebug.end("🎙️ Tap", "Started");
+    setState(() => _isProcessing = false);
   }
 
-  // ✅ PATIENT CONSENT DIALOG
-  Future<bool?> _showConsentDialog() async {
+  Future<bool?> _showConsentDialog() {
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
+      builder: (_) => AlertDialog(
         title: const Text("Patient Consent Required"),
-        content: const SingleChildScrollView(
-          child: Text(
-            "Before recording, please confirm that:\n\n"
-            "• The patient has been informed about the purpose of this recording.\n"
-            "• The recording will be stored securely on this device only.\n"
-            "• It may be used for diagnostic or academic analysis under confidentiality.\n\n"
-            "Do you confirm that patient consent has been obtained?",
-            style: TextStyle(fontSize: 14, height: 1.4),
-          ),
+        content: const Text(
+          "Before recording, confirm the patient has been informed and consented.",
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Cancel")),
+            child: const Text("Cancel"),
+            onPressed: () => Navigator.pop(context, false),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Theme.of(context).cardColor),
-            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
             child: const Text("Yes, I Confirm"),
+            onPressed: () => Navigator.pop(context, true),
           ),
         ],
       ),
@@ -218,127 +291,151 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   Future<void> _startRecording() async {
-    LatencyDebug.mark("🎙 Record", "Recorder initializing");
     _recordingDataController = StreamController<Uint8List>();
-    _dataSubscription =
-        _recordingDataController!.stream.listen(_updateWaveform);
+    _dataSubscription = _recordingDataController!.stream.listen(_updateWaveform);
 
-    await _dataStreamer.startRecorder(
-      toStream: _recordingDataController!.sink,
-      codec: Codec.pcm16,
-    );
+   try {
+      await _dataStreamer.startRecorder(
+        toStream: _recordingDataController!.sink,
+        codec: Codec.pcm16,
+        numChannels: 1,
+        sampleRate: 4000,
+      );
+    } catch (e) {
+      debugPrint("Waveform recorder unavailable: $e");
+    }
 
     final tempDir = await Directory.systemTemp.createTemp();
     final tempPath = '${tempDir.path}/temp_recording.wav';
 
-    const recordConfig = file_recorder.RecordConfig(
-      encoder: file_recorder.AudioEncoder.wav,
-      sampleRate: 4000,
-      numChannels: 1,
+    await _fileRecorder.start(
+      const record_lib.RecordConfig(
+        encoder: record_lib.AudioEncoder.wav,
+        sampleRate: 4000,
+        numChannels: 1,
+      ),
+      path: tempPath,
     );
-
-    await _fileRecorder.start(recordConfig, path: tempPath);
-    LatencyDebug.mark("🎙 Record", "Recorder fully started (file + stream ready)");
 
     setState(() {
       _isRecording = true;
       _spots = [];
       _timeCounter = 0;
       _duration = Duration.zero;
-      _displayGain = 1.0;
     });
 
-    LatencyDebug.end("🎙 Record", "Recording officially running");
     _startTimer();
-    _startAutoStopTimer();
-  }
 
-  void _startAutoStopTimer() {
-    _recordingTimer?.cancel();
     _recordingTimer = Timer(
       const Duration(seconds: _recordingDurationInSeconds),
-      () {
-        if (_isRecording && mounted) _toggleRecording();
+      () async {
+        if (_isRecording) {
+          HapticFeedback.mediumImpact();
+          await _stopRecording();
+        }
       },
     );
   }
 
-  Future<void> _stopRecording() async {
-    final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
-    LatencyDebug.resetSession(sessionId);
-    LatencyDebug.start("🎙 Stop", "Stopping recording session");
-    _recordingTimer?.cancel();
-    if (!_dataStreamer.isRecording) return;
+  Future<void> _stopRecording({bool forceDiscard = false}) async {
+    if (!_isRecording) return;
 
+    setState(() => _isProcessing = true);
+    _recordingTimer?.cancel();
     await _dataStreamer.stopRecorder();
     final path = await _fileRecorder.stop();
-    if (path == null) return;
 
     _dataSubscription?.cancel();
     _recordingDataController?.close();
     _stopTimer();
 
-    if (!mounted) return;
+    setState(() => _isRecording = false);
 
-    setState(() {
-      _isRecording = false;
-      _isProcessing = true;
-    });
+    if (forceDiscard) {
+      if (path != null) File(path).delete();
+      setState(() => _isProcessing = false);
+      return;
+    }
 
-    final aiResult =
-        await _tfliteService.runInference(filePath: path, session: sessionId);
-    final melPng =
-        await _tfliteService.generateMelImageBytes(path, session: sessionId);
+    if (path == null) {
+      setState(() => _isProcessing = false);
+      return;
+    }
 
-    if (!mounted) return;
+try {
+  final len = await File(path).length();
+  // ~2KB is a safe minimum for 5s @ 4 kHz mono PCM16 WAV headers+data
+  if (len < 2000) {
+    debugPrint("❌ Corrupted/empty audio file discarded (size: $len)");
+    await File(path).delete().catchError((_) async => File(path));
     setState(() => _isProcessing = false);
+    _toast("Recording failed. Please try again.");
+    return;
+  }
+} catch (_) {
+  setState(() => _isProcessing = false);
+  _toast("Recording failed. Please try again.");
+  return;
+}
+
+    final session = DateTime.now().millisecondsSinceEpoch.toString();
+    Map<String, dynamic>? aiResult;
+    Uint8List? melPng;
+
+    try {
+      aiResult = await _tfliteService.runInference(filePath: path, session: session);
+      melPng = await _tfliteService.generateMelImageBytes(path, session: session);
+    } catch (_) {}
 
     await _handleRecordingSave(path, aiResult, melPng);
-    LatencyDebug.end("🎙 Stop", "Recording + postprocessing complete", sessionId);
+    setState(() => _isProcessing = false);
   }
-
-  // ... (no changes below except existing save logic) ...
 
   Future<void> _handleRecordingSave(
       String tempPath, Map<String, dynamic>? aiResult, Uint8List? melPng) async {
-    LatencyDebug.start("📦 Save", "Begin saving & DB pipeline");
     try {
-      Map<String, dynamic>? patient = _currentPatient;
-      if (patient == null) {
-        patient = await _showPatientDialog();
-        if (patient == null) return;
-        setState(() => _currentPatient = patient);
-      }
+      Map<String, dynamic>? patient =
+          _currentPatient ?? await _showPatientDialog();
+      if (patient == null) return;
 
-      final patientId = patient['patient_id'] ?? patient['id'];
+      setState(() => _currentPatient = patient);
+
+      final patientId = patient['patient_id'];
       String? folderPath = patient['folder_path'];
 
       if (folderPath == null || folderPath.isEmpty) {
         final basePath = await storage.getOrCreateBaseFolder();
-        folderPath = await storage.createPatientSubfolders(basePath, patientId);
+        folderPath =
+            await storage.createPatientSubfolders(basePath, patientId);
         await db.updatePatientFolderPath(patientId, folderPath);
       }
 
       await storage.setCurrentPatient(patientId);
-      final patientName = patient['name'] ?? 'Unknown';
-      patientName.replaceAll(RegExp(r'[^a-zA-Z0-9_ ]'), "_");
 
-      final formattedId = db.formatPatientId(patientId); // e.g. "CS000012"
-      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-      final newFileName = "${formattedId}_$timestamp.wav";
-      final newPublicPath = "$folderPath/Recordings/$newFileName";
+      final formattedId = db.formatPatientId(patientId);
+      final ts = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final newFileName = "${formattedId}_$ts.wav";
+      final internalPath = "$folderPath/Recordings/$newFileName";
 
-      final newFile = File(newPublicPath);
-      await newFile.parent.create(recursive: true); // ✅ Ensure folders exist
-      
-      final tempFile = File(tempPath);
-      await tempFile.copy(newPublicPath);
-      await tempFile.delete();
+      await Directory("$folderPath/Recordings").create(recursive: true);
+      await File(tempPath).copy(internalPath);
+      await File(tempPath).delete();
+
+      final prefs = await SharedPreferences.getInstance();
+      final pid = prefs.getInt("practitioner_id")!;
+      final email = prefs.getString("practitioner_email")!;
+
+      await storage.mirrorWavToExternal(
+        practitionerId: pid,
+        practitionerEmail: email,
+        patientId: patientId,
+        wavPathInternal: internalPath,
+      );
 
       final recordDate = DateTime.now();
       final recordId = await db.insertRecord({
         "patient_id": patientId,
-        "file_path": newPublicPath,
+        "file_path": internalPath,
         "record_date": recordDate.toIso8601String(),
       });
 
@@ -346,229 +443,312 @@ class _RecordPageState extends State<RecordPage> {
         await db.insertAnalysis({
           "record_id": recordId,
           "diagnosis": aiResult['label'] ?? "Error",
-          "probabilities":
-              aiResult['probabilities'] != null ? jsonEncode(aiResult['probabilities']) : "{}",
+          "probabilities": jsonEncode(aiResult['probabilities'] ?? {}),
           "analysis_date": DateTime.now().toIso8601String(),
         });
       }
 
       if (!mounted) return;
-      await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => ReportGeneratedPage(
-          patientId: patientId,
-          patientName: patientName,
-          patientAge: patient?['age'] ?? '-',
-          patientGender: patient?['gender'] ?? '-',
-          filePath: newPublicPath,
-          recordedDate: recordDate,
-          classification: aiResult?['label'] ?? 'Error',
-          probabilities:
-              aiResult?['probabilities'] as Map<String, dynamic>? ?? {},
-          patientBirthday: patient?['birthday']?.toString(),
-          symptoms: patient?['symptoms']?.toString(),
-          melPngBytes: melPng,
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ReportGeneratedPage(
+            patientId: patientId,
+            patientName: patient['name'],
+            patientAge: patient['age'] ?? '-',
+            patientGender: patient['gender'] ?? '-',
+            filePath: internalPath,
+            recordedDate: recordDate,
+            classification: aiResult?['label'] ?? 'Error',
+            probabilities: aiResult?['probabilities'] ?? {},
+            patientBirthday: patient['birthday'],
+            symptoms: patient['symptoms'],
+            melPngBytes: melPng,
+          ),
         ),
-      ));
+      );
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error saving record: $e')));
+      _toast("Error saving record: $e");
     }
   }
 
+  Future<Map<String, dynamic>?> _showPatientDialog(
+      {bool switchMode = false}) async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: switchMode,
+      builder: (_) => PatientFormDialog(isSwitchMode: switchMode),
+    );
 
-  // ✅ Updated _showPatientDialog — allows editing symptoms before recording
-// ✅ Simplified and fixed _showPatientDialog using showDialog (returns proper result)
-Future<Map<String, dynamic>?> _showPatientDialog({bool switchMode = false}) async {
-  final result = await showDialog<Map<String, dynamic>>(
-    context: context,
-    barrierDismissible: switchMode,
-    builder: (_) => PatientFormDialog(isSwitchMode: switchMode),
-  );
-
-  if (result != null) {
-    final db = DatabaseHelper.instance;
-    final patientId = result['patient_id'];
-    await db.database.then((conn) {
-      conn.update(
-        'patients',
-        {'symptoms': result['symptoms'] ?? ''},
-        where: 'patient_id = ?',
-        whereArgs: [patientId],
-      );
-    });
-
-    await _loadCurrentPatient();
+    if (result != null) {
+      final id = result['patient_id'];
+      await db.database.then((c) {
+        c.update(
+          "patients",
+          {"symptoms": result['symptoms'] ?? ''},
+          where: "patient_id = ?",
+          whereArgs: [id],
+        );
+      });
+      await _loadCurrentPatient();
+    }
+    return result;
   }
 
-  return result;
-}
+  Future<void> _switchPatient() async {
+    final res =
+        await _showPatientDialog(switchMode: _currentPatient != null);
+    if (res == null) return;
+    final fresh = await db.getPatientById(res['patient_id']);
+    setState(() => _currentPatient = fresh ?? res);
+    await storage.setCurrentPatient(res['patient_id']);
+    _toast("Switched patient", success: true);
+  }
 
-
-  // 🩺 Smart patient logic: "Add" for first-time, "Switch" if existing
-Future<void> _switchPatient() async {
-  final hasExisting = _currentPatient != null;
-  final isSwitchMode = hasExisting;
-
-  final result = await _showPatientDialog(switchMode: isSwitchMode);
-  if (result == null) return;
-
-  if (!mounted) return;
-
-  final fresh = await db.getPatientById(result['patient_id']);
-  setState(() => _currentPatient = fresh ?? result);
-  await storage.setCurrentPatient(result['patient_id']);
-
-  if (!mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(isSwitchMode
-          ? 'Switched to patient: ${result['name']}'
-          : 'Added new patient: ${result['name']}'),
-      backgroundColor: AppColors.primary,
-      duration: const Duration(seconds: 2),
-    ),
-  );
-}
-
-
-  // === waveform visualisation ===
   void _updateWaveform(Uint8List rawData) {
-    if (_spots.isEmpty) {
-  LatencyDebug.mark("🎙 Record", "First waveform chunk received (${rawData.lengthInBytes} bytes)");
-}
-    if (!mounted) return;
     final bd = rawData.buffer.asByteData();
     final tmp = <double>[];
+
     for (int i = 0; i < rawData.lengthInBytes; i += 2) {
       tmp.add(bd.getInt16(i, Endian.little) / 32768.0);
     }
 
     const int step = 100;
-    const double timeStep = 0.007;
+    double prev = 0;
     final reduced = <double>[];
-    double prev = 0.0;
 
     for (int i = 0; i < tmp.length; i += step) {
-      double avg = 0;
-      int count = 0;
-      for (int j = i; j < i + step && j < tmp.length; j++) {
-        avg += tmp[j];
-        count++;
-      }
-      avg /= (count == 0 ? 1 : count);
+      final slice = tmp.sublist(i, math.min(i + step, tmp.length));
+      final avg = slice.reduce((a, b) => a + b) / slice.length;
       final smoothed = prev + _smoothAlpha * (avg - prev);
       prev = smoothed;
       reduced.add(smoothed);
     }
 
-    final peak = reduced.fold(1e-6, (double m, e) => math.max(m, e.abs()));
+    final peak = reduced.fold(1e-6, (m, e) => math.max(m, e.abs()));
     double targetGain = 1 / (peak * 1.2);
     targetGain = targetGain.clamp(0.8, 6.0);
     _displayGain = 0.9 * _displayGain + 0.1 * targetGain;
 
     setState(() {
       for (final s in reduced) {
-        _timeCounter += timeStep;
-        final value = (s * _displayGain).clamp(-1.0, 1.0);
-        _spots.add(FlSpot(_timeCounter, value));
+        _timeCounter += 0.007;
+        _spots.add(FlSpot(_timeCounter, (s * _displayGain).clamp(-1, 1)));
       }
-      const int maxVisible = 1000;
       if (_spots.length > _visiblePoints) {
-        _spots = _spots.sublist(_spots.length - maxVisible);
+        _spots = _spots.sublist(_spots.length - _visiblePoints);
       }
     });
   }
 
   void _startTimer() {
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _duration += const Duration(seconds: 1));
-    });
+    _timer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => setState(() => _duration += const Duration(seconds: 1)),
+    );
   }
 
   void _stopTimer() => _timer?.cancel();
 
-  String _formatDuration(Duration d) {
-    final mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final ss = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return "$mm:$ss";
-  }
+  String _formatDuration(Duration d) =>
+      "${d.inMinutes.remainder(60).toString().padLeft(2, "0")}:${d.inSeconds.remainder(60).toString().padLeft(2, "0")}";
 
-  // === UI ===
+Future<void> _pickWavFile() async {
+  try {
+    // Pick only WAV files
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['wav'],
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    final path = result.files.single.path!;
+    final file = File(path);
+    if (!await file.exists()) return;
+
+    setState(() => _isProcessing = true);
+    _toast("Analyzing selected WAV...", success: true);
+
+// ✅ Ensure models loaded (avoid redundant reload)
+if (!_tfliteService.isLoaded) {
+  await _tfliteService.loadModels();
+}
+
+
+// ✅ Trim to 5 s (20 000 samples @ 4 kHz, 16 bit mono)
+final bytes = await file.readAsBytes();
+if (bytes.length < 44) {
+  _toast("Invalid WAV file.");
+  setState(() => _isProcessing = false);
+  return;
+}
+
+if (!mounted) return;
+
+// 🧠 If file longer than 5 s (~40000 samples @ 4 kHz), ask confirmation
+final pcmAll = bytes.sublist(44);
+if (pcmAll.length > 40000) {
+  final cont = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text("Trim Long Recording?"),
+      content: const Text(
+          "Only the first 5 seconds will be analyzed.\n\nDo you want to continue?"),
+      actions: [
+        TextButton(
+          child: const Text("Cancel"),
+          onPressed: () => Navigator.pop(context, false),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text("Continue"),
+          onPressed: () => Navigator.pop(context, true),
+        ),
+      ],
+    ),
+  );
+  if (cont != true) {
+    setState(() => _isProcessing = false);
+    return;
+  }
+}
+
+// ✅ Define `fiveSecBytes` properly here
+final fiveSecBytes = pcmAll.length > 40000 ? pcmAll.sublist(0, 40000) : pcmAll;
+
+// ✅ Create trimmed file
+final trimmed = Uint8List(44 + fiveSecBytes.length);
+trimmed.setRange(0, 44, bytes.sublist(0, 44));
+trimmed.setRange(44, 44 + fiveSecBytes.length, fiveSecBytes);
+
+// 🔒 Fix header fields for strict WAV parsers (insert below)
+final bd = trimmed.buffer.asByteData();
+bd.setUint32(4, trimmed.lengthInBytes - 8, Endian.little); // total file size
+bd.setUint32(40, fiveSecBytes.length, Endian.little);      // data chunk size
+
+    final tempDir = await Directory.systemTemp.createTemp();
+    final tempPath = '${tempDir.path}/import_trimmed.wav';
+    await File(tempPath).writeAsBytes(trimmed);
+
+    // ✅ Run AI analysis
+    final session = DateTime.now().millisecondsSinceEpoch.toString();
+    final aiResult =
+        await _tfliteService.runInference(filePath: tempPath, session: session);
+    final melPng =
+        await _tfliteService.generateMelImageBytes(tempPath, session: session);
+
+    await _handleRecordingSave(tempPath, aiResult, melPng);
+  } catch (e) {
+    _toast("Import failed: $e");
+} finally {
+  // 🧹 Cleanup temporary directory (safe, optional)
+  try {
+    final tempDir = Directory.systemTemp;
+    await for (final entity in tempDir.list()) {
+      if (entity is Directory && entity.path.contains('import_trimmed')) {
+        await entity.delete(recursive: true);
+      }
+    }
+  } catch (_) {}
+  setState(() => _isProcessing = false);
+}
+}
+
   @override
   Widget build(BuildContext context) {
-    final instructionText =
-        _isRecording ? "Recording... (stops in $_recordingDurationInSeconds s)" : "Tap to Start";
+    final instruction = _isRecording
+        ? "Recording... (5s)"
+        : "Tap to record";
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-        title: Text(
-          'Record Heart Sound',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onPrimary, // ✅ consistent white text
-            fontWeight: FontWeight.w600,
+        foregroundColor: Colors.white,
+        title: const Text("Record Heart Sound"),
+        actions: [
+          IconButton(
+            tooltip: "Import WAV file",
+            icon: const Icon(Icons.upload_file_rounded),
+            onPressed: _isProcessing ? null : _pickWavFile,
           ),
-        ),
+        ],
       ),
       body: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16.0),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: Column(
           children: [
             _buildReceiverStatusBanner(),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             _buildPatientInfoCard(),
             const SizedBox(height: 8),
+
             Expanded(
-              child: _isRecording ? _buildRecordingView() : _buildGuidelinesView(),
-            ),
-            Hero(
-              tag: 'record_button_hero',
-              child: GestureDetector(
-                onTap: _toggleRecording,
-                child: Opacity(
-                  opacity: _isUsbMicConnected ? 1 : 0.6,
-                  child: Container(
-                    width: ButtonConstants.micButtonSize,
-                    height: ButtonConstants.micButtonSize,
-                    decoration: BoxDecoration(
-                      color: _isRecording 
-                          ? AppColors.primary
-                          :Theme.of(context).colorScheme.primary,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.15),
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
-                        )
-                      ],
-                    ),
-                    child: Center(
-                      child: _isProcessing
-                          ? const CircularProgressIndicator(color: AppColors.primary)
-                          : Icon(
-                              _isRecording ? Icons.stop_rounded : Icons.mic,
-                              color: _isRecording ? AppColors.primary : Theme.of(context).colorScheme.onSurface,
-                              size: 50,
-                            ),
-                    ),
-                  ),
-                ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _isRecording
+                    ? _buildRecordingView()
+                    : _buildGuidelinesView(),
               ),
             ),
-            const SizedBox(height: 16),
-            Text(instructionText, style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface)),
-            const SizedBox(height: 8),
+
+            const SizedBox(height: 10),
+
+            Hero(
+  tag: "record_button_hero",
+  child: Opacity(
+    opacity: _isProcessing ? 0.5 : 1,
+    child: GestureDetector(
+      onTap: _isProcessing ? null : _toggleRecording,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        width: 125,
+        height: 125,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primary,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Center(
+          child: _isProcessing
+              ? const CircularProgressIndicator(color: Colors.white)
+              : Icon(
+                  _isRecording ? Icons.stop_rounded : Icons.mic,
+                  size: 60,
+                  color: Colors.white,
+                ),
+        ),
+      ),
+    ),
+  ),
+),
+
+            const SizedBox(height: 6),
+
+            Text(
+              instruction,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+
+            const SizedBox(height: 12),
           ],
         ),
       ),
     );
   }
 
-  // === Small receiver banner ===
   Widget _buildReceiverStatusBanner() {
     return Container(
       width: double.infinity,
@@ -579,10 +759,6 @@ Future<void> _switchPatient() async {
             ? AppColors.success.withValues(alpha: 0.15)
             : AppColors.warning.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: _isUsbMicConnected ? AppColors.success : AppColors.warning,
-          width: 0.8,
-        ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -592,12 +768,14 @@ Future<void> _switchPatient() async {
             color: _isUsbMicConnected ? AppColors.success : AppColors.warning,
             size: 18,
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           Text(
-            _isUsbMicConnected ? "Receiver Connected" : "Receiver Disconnected",
+            _isUsbMicConnected
+                ? "Receiver Connected"
+                : "Receiver Disconnected",
             style: TextStyle(
-              color: _isUsbMicConnected ? AppColors.success : AppColors.warning,
               fontWeight: FontWeight.w600,
+              color: _isUsbMicConnected ? AppColors.success : AppColors.warning,
             ),
           ),
         ],
@@ -605,176 +783,139 @@ Future<void> _switchPatient() async {
     );
   }
 
-  // === Reuse of old UI cards (patient + waveform) ===
-  Widget _buildPatientInfoCard() {
-    final name = _currentPatient?['name'];
-    final hasPatient = name != null && name.isNotEmpty;
-    final isDisabled = _isRecording || _isProcessing;
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final symptoms = _currentPatient?['symptoms']?.toString() ?? '';
+Widget _buildGuidelinesView() {
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 20),
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 🩺 Title (centered for symmetry)
+        Center(
+          child: Text(
+            "Recording Guidelines",
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.deep,
+                ),
+          ),
+        ),
+        Center(
+  child: TextButton.icon(
+    icon: const Icon(Icons.upload_file_rounded),
+    label: const Text("Import existing WAV"),
+    onPressed: _isProcessing ? null : _pickWavFile,
+  ),
+),
 
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 300),
-      opacity: isDisabled ? 0.5 : 1.0,
-      child: IgnorePointer(
-        ignoring: isDisabled,
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 12.0),
-          padding: const EdgeInsets.all(12),
+
+        const SizedBox(height: 14),
+
+        // Diagram
+        Center(
+          child: Image.asset(
+            'assets/images/mitral_area_guide.png',
+            height: 160,
+            fit: BoxFit.contain,
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        // Guideline bullets
+        _buildGuidelineItem(Icons.mic_off_rounded, "Quiet environment"),
+        _buildGuidelineItem(Icons.place_rounded, "Place at mitral area"),
+        _buildGuidelineItem(Icons.timer_rounded, "Record for 5 seconds"),
+        _buildGuidelineItem(Icons.person_rounded, "Patient remains still"),
+
+        const SizedBox(height: 10),
+
+        // Clinical notes box (aligned left, simple and readable)
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-            border: Border.all(
-              color: Theme.of(context).dividerColor.withValues(alpha: 0.4),
-            ),
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.08),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              )
-            ],
+            color: Colors.grey.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(children: [
-                    const Icon(Icons.person, color: AppColors.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      hasPatient ? name : "No patient selected",
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                  ]),
-                  TextButton.icon(
-                    onPressed: isDisabled ? null : _switchPatient,
-                    icon: Icon(
-                      Icons.swap_horiz_rounded,
-                      color: isDisabled
-                          ? Theme.of(context).colorScheme.onSurface
-                          : AppColors.primary,
-                    ),
-                    label: Text(
-                      hasPatient ? "Switch" : "Add",
-                      style: TextStyle(
-                        color: isDisabled
-                            ? Theme.of(context).colorScheme.onSurface
-                            : AppColors.primary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (symptoms.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  "Symptoms: $symptoms",
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.7),
-                        ),
-                      ),
-                    ],
-                  ],
+              Text(
+                "For patients with prominent breast tissue, assistance may help accurate placement.",
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Colors.grey.shade700,
+                  height: 1.4,
                 ),
               ),
-            ),
-        );
-      }
+              const SizedBox(height: 4),
+              Text(
+                "For dextrocardia or situs inversus, mirror placement to right side.",
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Colors.grey.shade700,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
-
-  Widget _buildGuidelinesView() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24.0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text('Recording Guidelines',
-              style: Theme.of(context)
-                  .textTheme
-                  .headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 16),
-          SizedBox(height: 180, child: Image.asset('assets/images/mitral_area_guide.png')),
-          const SizedBox(height: 24),
-          _buildGuidelineItem(Icons.mic_off_rounded, 'Ensure a quiet environment.'),
-          _buildGuidelineItem(Icons.place_rounded,
-              'Place stethoscope at the mitral area (as shown).'),
-          _buildGuidelineItem(
-              Icons.timer_rounded, 'Recording will last $_recordingDurationInSeconds seconds.'),
-          _buildGuidelineItem(Icons.person_rounded,
-              'Ensure the patient remains still during recording.'),
-        ],
-      ),
-    );
-  }
 
   Widget _buildRecordingView() {
-    final double minX = _spots.isNotEmpty ? math.max(0, _spots.last.x - _visiblePoints) : 0;
-    final double maxX = _spots.isNotEmpty ? _spots.last.x : _visiblePoints.toDouble();
+    final minX =
+        _spots.isNotEmpty ? math.max(0, _spots.last.x - _visiblePoints) : 0;
+    final maxX =
+        _spots.isNotEmpty ? _spots.last.x : _visiblePoints.toDouble();
 
     return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Expanded(
           child: Container(
-            width: double.infinity,
-            margin: const EdgeInsets.symmetric(horizontal: 24.0),
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.2),
+                  color: Colors.black.withValues(alpha: 0.15),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
-                )
+                ),
               ],
+              border: Border.all(
+                color: Colors.black.withValues(alpha: 0.1),
+                width: 1,
+              ),
             ),
             child: _spots.isEmpty
-                ? Center(
-                    child:
-                        Text('Waiting for audio data...', style: TextStyle(color: Theme.of(context).colorScheme.onSurface)))
+                ? const Center(child: Text("Waiting for audio..."))
                 : ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: LineChart(
                       LineChartData(
                         titlesData: const FlTitlesData(show: false),
-                        gridData: FlGridData(
-                          show: true,
-                          drawVerticalLine: false,
-                          horizontalInterval: 0.5,
-                          getDrawingHorizontalLine: (v) => FlLine(
-                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.12),
-                            strokeWidth: 0.6,
-                          ),
-                        ),
+                        gridData: const FlGridData(show: false),
                         borderData: FlBorderData(show: false),
                         clipData: const FlClipData.all(),
                         minY: -1.2,
                         maxY: 1.2,
-                        minX: minX,
-                        maxX: maxX,
-                        lineTouchData: const LineTouchData(enabled: false),
+                        minX: minX.toDouble(),
+                        maxX: maxX.toDouble(),
+                        lineTouchData:
+                            const LineTouchData(enabled: false),
                         lineBarsData: [
                           LineChartBarData(
                             spots: _spots,
                             isCurved: true,
                             color: AppColors.primary,
-                            barWidth: 2.0,
-                            isStrokeCapRound: true,
+                            barWidth: 2,
                             dotData: const FlDotData(show: false),
                           ),
                         ],
@@ -783,22 +924,87 @@ Future<void> _switchPatient() async {
                   ),
           ),
         ),
-        const SizedBox(height: 24),
-        Text(_formatDuration(_duration),
-            style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w300)),
+        const SizedBox(height: 16),
+        Text(
+          _formatDuration(_duration),
+          style: const TextStyle(
+            fontSize: 40,
+            fontWeight: FontWeight.w300,
+          ),
+        ),
       ],
     );
   }
 
   Widget _buildGuidelineItem(IconData icon, String text) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Icon(icon, color: AppColors.primary, size: 24),
-          const SizedBox(width: 16),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 15, height: 1.4))),
+          Icon(icon, color: AppColors.primary),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPatientInfoCard() {
+    final name = _currentPatient?['name'] ?? "";
+    final symptoms = _currentPatient?['symptoms'] ?? "";
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: Theme.of(context).cardColor,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(children: [
+                const Icon(Icons.person, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Text(
+                  name.isNotEmpty ? name : "No patient selected",
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ]),
+              TextButton.icon(
+                onPressed: _switchPatient,
+                icon: const Icon(Icons.swap_horiz_rounded,
+                    color: AppColors.primary),
+                label: Text(name.isNotEmpty ? "Switch" : "Add"),
+              ),
+            ],
+          ),
+          if (symptoms.toString().isNotEmpty)
+            Text(
+              "Symptoms: $symptoms",
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey.shade700,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _toast(String msg, {bool success = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor:
+            success ? AppColors.success : AppColors.warning,
+        duration: const Duration(seconds: 2),
       ),
     );
   }

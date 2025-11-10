@@ -1,73 +1,30 @@
-// lib\main.dart
-import 'dart:io';
-
-import 'package:cardioscope_app/pages/onboarding_page.dart';
-import 'package:cardioscope_app/utils/app_colors.dart';
-import 'package:cardioscope_app/utils/app_theme.dart';
+// lib/main.dart
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'database_helper.dart';
 import 'pages/dashboard.dart';
-import 'pages/login.dart';
 import 'pages/record.dart';
 import 'pages/reports.dart';
 import 'pages/settings.dart';
+import 'pages/splash_init_page.dart';
 import 'services/storage_service.dart';
-import 'services/tflite_service.dart';
+import 'utils/app_colors.dart';
+import 'utils/app_theme.dart';
 
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await [
-    Permission.microphone,
-    Permission.storage,
-    if (Platform.isAndroid && Platform.version.compareTo("30") >= 0)
-      Permission.manageExternalStorage,
-  ].request();
-
-  // ✅ Ensure CardioScope base folder exists
-  final storageService = StorageService();
-  await storageService.ensureBaseFolder();
-
-
   final prefs = await SharedPreferences.getInstance();
-  final hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
-  final int? practitionerId = prefs.getInt("practitioner_id");
-  final isDarkMode = prefs.getBool('isDarkMode') ?? false;
-  themeNotifier.value = isDarkMode ? ThemeMode.dark : ThemeMode.light;
+  final isDark = prefs.getBool('isDarkMode') ?? false;
+  themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
 
-  final tflite = TfliteService();
-  await tflite.loadModels(loadClassifier: true);
-
-  await DatabaseHelper.instance.verifyDatabaseStructure();
-
-  runApp(CardioScopeApp(
-    hasSeenOnboarding: hasSeenOnboarding,
-    isLoggedIn: practitionerId != null,
-  ));
+  runApp(const CardioScopeApp());
 }
 
 class CardioScopeApp extends StatelessWidget {
-  final bool hasSeenOnboarding;
-  final bool isLoggedIn;
-
-  const CardioScopeApp({
-    super.key,
-    required this.hasSeenOnboarding,
-    required this.isLoggedIn,
-  });
-
-  Widget _getInitialPage() {
-    if (!hasSeenOnboarding) {
-      return const OnboardingPage();
-    } else {
-      return isLoggedIn ? const MainNavigation() : const LoginPage();
-    }
-  }
+  const CardioScopeApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -92,12 +49,12 @@ class CardioScopeApp extends StatelessWidget {
           ),
           themeMode: mode,
           debugShowCheckedModeBanner: false,
-          home: _getInitialPage(),
+          navigatorObservers: [routeObserver],
+          home: const SplashInitPage(),
           routes: {
             '/record': (context) => const RecordPage(),
             '/reports': (context) => const ReportsPage(),
-            '/settings': (context) =>
-                SettingsPage(themeNotifier: themeNotifier),
+            '/settings': (context) => SettingsPage(themeNotifier: themeNotifier),
           },
         );
       },
@@ -105,6 +62,7 @@ class CardioScopeApp extends StatelessWidget {
   }
 }
 
+// ✅ NAVIGATION SHELL + Pulse mic button
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
 
@@ -112,19 +70,35 @@ class MainNavigation extends StatefulWidget {
   State<MainNavigation> createState() => _MainNavigationState();
 }
 
-class _MainNavigationState extends State<MainNavigation> {
+class _MainNavigationState extends State<MainNavigation>
+    with SingleTickerProviderStateMixin {
+
   int _selectedIndex = 0;
   final PageController _pageController = PageController();
   final GlobalKey<ReportsPageState> _reportsPageKey = GlobalKey();
-  late final List<Widget> _pages;
+
+  late final List<Widget> _pages = [
+    const DashboardPage(),
+    ReportsPage(key: _reportsPageKey),
+  ];
+
+  late AnimationController _pulse;
 
   @override
   void initState() {
     super.initState();
-    _pages = [
-      const DashboardPage(),
-      ReportsPage(key: _reportsPageKey),
-    ];
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+      lowerBound: 0.92,
+      upperBound: 1.06,
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
   }
 
   void _onItemTapped(int index) {
@@ -132,47 +106,20 @@ class _MainNavigationState extends State<MainNavigation> {
       _selectedIndex = index;
       _pageController.animateToPage(
         index,
-        duration: const Duration(milliseconds: 300),
+        duration: const Duration(milliseconds: 230),
         curve: Curves.easeInOut,
       );
     });
   }
 
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
+  Future<void> _goToRecord() async {
+    final storage = StorageService();
+    await storage.getOrCreateBaseFolder();
 
-  Future<void> _handleMicPressed() async {
-    final storageService = StorageService();
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    if (!mounted) return;
+    final refresh = await Navigator.pushNamed(context, '/record');
 
-    // ✅ Automatically ensure base folder exists (no manual folder picking)
-    try {
-      final basePath = await storageService.getOrCreateBaseFolder();
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('Save location: $basePath'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-
-      _navigateToRecordPage();
-    } catch (e) {
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('Storage access error: $e'),
-          backgroundColor: AppColors.warning,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
-  }
-
-  Future<void> _navigateToRecordPage() async {
-    final refreshNeeded = await Navigator.pushNamed(context, '/record');
-    if (refreshNeeded == true && mounted) {
+    if (refresh == true) {
       _reportsPageKey.currentState?.load();
       _onItemTapped(1);
     }
@@ -183,56 +130,75 @@ class _MainNavigationState extends State<MainNavigation> {
     return Scaffold(
       body: PageView(
         controller: _pageController,
-        onPageChanged: (index) => setState(() => _selectedIndex = index),
+        onPageChanged: (i) => setState(() => _selectedIndex = i),
         children: _pages,
       ),
-      floatingActionButton: Hero(
-        tag: 'record_button_hero',
-        child: FloatingActionButton.large(
-          onPressed: _handleMicPressed,
-          backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-          elevation: 8.0,
-          shape: const CircleBorder(),
-          child: const Icon(Icons.mic, size: 40),
+
+      floatingActionButton: GestureDetector(
+        onTap: _goToRecord,
+        child: Hero(
+          tag: 'record_button_hero',
+          child: ScaleTransition(
+            scale: _pulse,
+            child: Container(
+              width: 110,
+              height: 110,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.22),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.mic,
+                size: 52,
+                color: Colors.white,
+              ),
+            ),
+          ),
         ),
       ),
+
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+
       bottomNavigationBar: BottomAppBar(
         shape: const CircularNotchedRectangle(),
-        notchMargin: 10.0,
-        height: 70,
-        elevation: Theme.of(context).bottomAppBarTheme.elevation ?? 10,
-        color: Theme.of(context).bottomAppBarTheme.color,
-        surfaceTintColor:
-            Theme.of(context).bottomAppBarTheme.surfaceTintColor,
+        notchMargin: 12,
+        height: 78,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildNavItem(Icons.dashboard_rounded, 'Dashboard', 0),
+            _navItem(Icons.dashboard_rounded, 'Dashboard', 0),
             const SizedBox(width: 80),
-            _buildNavItem(Icons.analytics_rounded, 'Results', 1),
+            _navItem(Icons.analytics_rounded, 'Results', 1),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildNavItem(IconData icon, String label, int index) {
-    final isSelected = _selectedIndex == index;
-    final color = isSelected ? AppColors.primary : Colors.grey;
-
+  Widget _navItem(IconData icon, String label, int i) {
+    final active = _selectedIndex == i;
     return InkWell(
-      onTap: () => _onItemTapped(index),
-      borderRadius: BorderRadius.circular(20),
+      onTap: () => _onItemTapped(i),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 16.0),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: color),
-            const SizedBox(height: 4),
-            Text(label, style: TextStyle(color: color, fontSize: 12)),
+            Icon(icon, color: active ? AppColors.primary : Colors.grey),
+            Text(
+              label,
+              style: TextStyle(
+                color: active ? AppColors.primary : Colors.grey,
+                fontSize: 12,
+              ),
+            ),
           ],
         ),
       ),

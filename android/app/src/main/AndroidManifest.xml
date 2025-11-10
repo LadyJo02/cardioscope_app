@@ -20,7 +20,9 @@
         android:icon="@mipmap/launcher_icon"
         tools:replace="android:name"
         android:requestLegacyExternalStorage="true"
-        android:allowBackup="true">
+        android:allowBackup="true"
+        android:usesCleartextTraffic="true"
+        android:largeHeap="true">
 
         <activity
             android:name=".MainActivity"

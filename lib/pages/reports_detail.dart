@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/ui_helpers.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -25,7 +26,7 @@ class ReportDetailPage extends StatefulWidget {
 
 class _ReportDetailPageState extends State<ReportDetailPage> {
   final AudioPlayer _player = AudioPlayer();
-  late final Future<List<FlSpot>> _waveformFuture;
+  late Future<List<FlSpot>> _waveformFuture;
   final TfliteService _tfliteService = TfliteService();
 
   bool _isReanalyzing = false;
@@ -39,29 +40,82 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   @override
   void initState() {
     super.initState();
+
+    // ✅ Default so first build is safe
+    _waveformFuture = Future.value(<FlSpot>[]);
+
     _localReport = Map<String, dynamic>.from(widget.report);
-    _waveformFuture = _loadWaveformData();
     _initializeState();
     _loadPractitionerName();
     Future.delayed(const Duration(milliseconds: 200), _refreshPatientDetails);
 
-    final path = _localReport['file_path'] as String?;
-    if (path != null && File(path).existsSync()) {
-      _player.setFilePath(path).catchError((e) {
-        debugPrint("❌ Could not load audio file: $e");
-        return null;
+    // Resolve path then init player and waveform
+    _resolveAndPossiblyRepairPath().then((resolvedPath) async {
+      if (resolvedPath != null) {
+        _localReport['file_path'] = resolvedPath;
+        await _initAudioPlayer(resolvedPath);
+      }
+      setState(() {
+        _waveformFuture = _loadWaveformData();
       });
+
+      if (_melPng == null && resolvedPath != null) {
+        _generateMelIfNeeded();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  // -------- Path + Player --------
+
+  Future<String?> _resolveAndPossiblyRepairPath() async {
+    String? path = _localReport['file_path'] as String?;
+    if (path == null) return null;
+
+    File file = File(path);
+    if (await file.exists()) return path;
+
+    try {
+      final storage = StorageService();
+      final newBase = await storage.getOrCreateBaseFolder();
+      final leafName = path.split('/').last;
+      final patientId = _localReport['patient_id'];
+      final formattedId = DatabaseHelper.instance.formatPatientId(patientId ?? 0);
+      final candidate = File('$newBase/Patients/$formattedId/Recordings/$leafName');
+      if (await candidate.exists()) {
+        debugPrint("🔄 Repaired path: ${candidate.path}");
+        return candidate.path;
+      }
+      debugPrint("❌ Could not repair path for: $path");
+      return null;
+    } catch (e) {
+      debugPrint("⚠️ Path repair failed: $e");
+      return null;
     }
   }
 
+  Future<void> _initAudioPlayer(String path) async {
+    try {
+      await _player.setFilePath(path);
+      debugPrint("✅ Audio ready: $path");
+    } catch (e) {
+      debugPrint("❌ Could not load audio: $e");
+    }
+  }
+
+  // -------- State helpers --------
+
   Future<void> _loadPractitionerName() async {
     final prefs = await SharedPreferences.getInstance();
-    if (mounted) {
-      setState(() {
-        _practitionerName =
-            prefs.getString('practitioner_name') ?? 'Practitioner';
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _practitionerName = prefs.getString('practitioner_name') ?? 'Practitioner';
+    });
   }
 
   void _initializeState() {
@@ -71,9 +125,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     if (probsJson != null) {
       try {
         final decoded = jsonDecode(probsJson) as Map<String, dynamic>;
-        decoded.forEach((key, value) {
-          _currentProbabilities[key] = (value as num).toDouble();
-        });
+        decoded.forEach((k, v) => _currentProbabilities[k] = (v as num).toDouble());
       } catch (e) {
         debugPrint("⚠️ Error decoding probabilities: $e");
       }
@@ -83,24 +135,19 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
   Future<void> _refreshPatientDetails() async {
     try {
       final db = DatabaseHelper.instance;
-      final patientIdRaw = _localReport['patient_id'];
-      if (patientIdRaw == null) return;
-
-      final int? patientId = patientIdRaw is int
-          ? patientIdRaw
-          : int.tryParse(patientIdRaw.toString());
+      final raw = _localReport['patient_id'];
+      if (raw == null) return;
+      final int? patientId = raw is int ? raw : int.tryParse(raw.toString());
       if (patientId == null) return;
 
       final patient = await db.getPatientById(patientId);
       if (patient != null && mounted) {
         setState(() {
-          _localReport['name'] = patient['name'] ?? _localReport['name'];
-          _localReport['birthday'] =
-              patient['birthday'] ?? _localReport['birthday'];
-          _localReport['gender'] = patient['gender'] ?? _localReport['gender'];
-          _localReport['age'] = patient['age'] ?? _localReport['age'];
-          _localReport['symptoms'] =
-              patient['symptoms'] ?? _localReport['symptoms'];
+          _localReport['name']      = patient['name']      ?? _localReport['name'];
+          _localReport['birthday']  = patient['birthday']  ?? _localReport['birthday'];
+          _localReport['gender']    = patient['gender']    ?? _localReport['gender'];
+          _localReport['age']       = patient['age']       ?? _localReport['age'];
+          _localReport['symptoms']  = patient['symptoms']  ?? _localReport['symptoms'];
         });
       }
     } catch (e) {
@@ -108,26 +155,21 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     }
   }
 
-  @override
-  void dispose() {
-    _player.dispose();
-    super.dispose();
-  }
+  // -------- Waveform --------
 
   Future<List<FlSpot>> _loadWaveformData() async {
     final path = _localReport['file_path'] as String?;
     if (path == null) return [];
     final file = File(path);
     if (!await file.exists()) return [];
+
     final bytes = await file.readAsBytes();
     if (bytes.lengthInBytes <= 44) return [];
 
+    // find "data" chunk offset
     int dataOffset = 44;
     for (int i = 0; i < bytes.length - 4; i++) {
-      if (bytes[i] == 0x64 &&
-          bytes[i + 1] == 0x61 &&
-          bytes[i + 2] == 0x74 &&
-          bytes[i + 3] == 0x61) {
+      if (bytes[i] == 0x64 && bytes[i + 1] == 0x61 && bytes[i + 2] == 0x74 && bytes[i + 3] == 0x61) {
         dataOffset = i + 8;
         break;
       }
@@ -138,34 +180,41 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     final spots = <FlSpot>[];
     const downsample = 40;
 
-    for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsample)) {
-      if (i + 2 <= pcmBytes.lengthInBytes) {
-        final sample = byteData.getInt16(i, Endian.little) / 32768.0;
-        spots.add(FlSpot((i / 2).toDouble(), sample));
-      }
+    for (int i = 0; i + 2 <= pcmBytes.lengthInBytes; i += (2 * downsample)) {
+      final sample = byteData.getInt16(i, Endian.little) / 32768.0;
+      spots.add(FlSpot((i / 2).toDouble(), sample.toDouble()));
     }
+    debugPrint("✅ Waveform loaded: ${spots.length} samples");
     return spots;
   }
+
+  // -------- Mel Spectrogram --------
 
   Future<void> _generateMelIfNeeded() async {
     if (_melPng != null) return;
     final filePath = _localReport['file_path'] as String?;
     if (filePath == null) return;
 
-    if (!mounted) return;
     setState(() => _isReanalyzing = true);
-    final bytes = await _tfliteService.generateMelImageBytes(filePath);
-
-    if (!mounted) return;
-    setState(() {
-      _melPng = bytes;
-      _isReanalyzing = false;
-    });
+    try {
+      final bytes = await _tfliteService.generateMelImageBytes(filePath);
+      if (!mounted) return;
+      setState(() {
+        _melPng = bytes;
+        _isReanalyzing = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isReanalyzing = false);
+      debugPrint("❌ Mel generation failed: $e");
+    }
   }
+
+  // -------- Re-analyze --------
 
   Future<void> _reAnalyze() async {
     final filePath = _localReport['file_path'] as String?;
-    final recordId = _localReport['record_id'] as int?;
+    final recordId  = _localReport['record_id'] as int?;
     if (filePath == null || recordId == null) return;
 
     setState(() => _isReanalyzing = true);
@@ -174,8 +223,9 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
       if (result == null) {
         if (!mounted) return;
         setState(() => _isReanalyzing = false);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text("Re-analysis failed.")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Re-analysis failed.")),
+        );
         return;
       }
 
@@ -185,16 +235,34 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           (k, v) => MapEntry(k.toString(), (v as num).toDouble()),
         ),
       );
-      final probsJson = jsonEncode(probs);
-      final nowIso = DateTime.now().toIso8601String();
 
       final db = DatabaseHelper.instance;
-      await db.upsertAnalysisByRecordId(
-        recordId,
-        diagnosis: diagnosis,
-        probabilitiesJson: probsJson,
-        analysisDateIso: nowIso,
-      );
+      // ✅ Save full enriched model results
+await db.upsertAnalysisByRecordId(
+  recordId,
+  diagnosis: diagnosis,
+  probabilitiesJson: jsonEncode(probs),
+  analysisDateIso: DateTime.now().toIso8601String(),
+);
+
+// ✅ Update heart_sound_records table with flattened values
+await db.database.then((conn) {
+  conn.update(
+    'heart_sound_records',
+    {
+      'diagnosis': diagnosis,
+      'probabilities': jsonEncode(probs),
+      'prob_normal': probs['N'] ?? 0,
+      'prob_mr':     probs['MR'] ?? 0,
+      'prob_ms':     probs['MS'] ?? 0,
+      'prob_mvp':    probs['MVP'] ?? 0,
+      'confidence':  (probs[diagnosis] ?? 0),
+    },
+    where: 'record_id = ?',
+    whereArgs: [recordId],
+  );
+});
+
 
       final melBytes = await _tfliteService.generateMelImageBytes(filePath);
       if (!mounted) return;
@@ -203,6 +271,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
         _currentProbabilities = probs;
         _melPng = melBytes;
         _isReanalyzing = false;
+        _refreshPatientDetails(); // ✅ Refresh hydrated DB data too
       });
 
       if (!mounted) return;
@@ -217,41 +286,176 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     }
   }
 
+  Future<void> _showEditDialog(
+    BuildContext context, DatabaseHelper db, StorageService storage) async {
+    
+    bool dirty = false; // track unsaved changes
+    
+    final nameCtrl = TextEditingController(text: _localReport['name'] ?? '');
+    final genderCtrl = TextEditingController(text: _localReport['gender'] ?? '');
+    final birthdayCtrl =
+        TextEditingController(text: _localReport['birthday'] ?? '');
+
+    // Compute age from yyyy-MM-dd (or leave null if invalid)
+int? ageFromBirthday(String ymd) {
+  try {
+    final b = DateTime.parse(ymd);
+    final now = DateTime.now();
+    var age = now.year - b.year;
+    final hasNotHadBirthdayThisYear =
+        (now.month < b.month) || (now.month == b.month && now.day < b.day);
+    if (hasNotHadBirthdayThisYear) age--;
+    return (age >= 0 && age < 130) ? age : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Edit Patient Info"),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            controller: nameCtrl, 
+            decoration: const InputDecoration(labelText: "Name"),
+            onChanged: (_) => dirty = true, // mark dirty
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: genderCtrl, 
+            decoration: const InputDecoration(labelText: "Gender"),
+            onChanged: (_) => dirty = true, // mark dirty
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: birthdayCtrl,
+            readOnly: true,
+            decoration: const InputDecoration(
+              labelText: "Birthday",
+              suffixIcon: Icon(Icons.calendar_today),
+            ),
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: DateTime.tryParse(birthdayCtrl.text) ?? DateTime(2000),
+                firstDate: DateTime(1900),
+                lastDate: DateTime.now(),
+              );
+              if (picked != null) {
+                birthdayCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
+                dirty = true; // mark dirty
+              }
+            },
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            ),
+            onPressed: dirty
+                ? () async {
+final patientId = _localReport['patient_id'] as int?;
+if (patientId != null) {
+  final age = ageFromBirthday(birthdayCtrl.text.trim());
+
+  // 1) Update DB
+  await db.database.then((conn) {
+    conn.update(
+      'patients',
+      {
+        'name': nameCtrl.text.trim(),
+        'gender': genderCtrl.text.trim(),
+        'birthday': birthdayCtrl.text.trim(),
+        'age': age,
+      },
+      where: 'patient_id = ?',
+      whereArgs: [patientId],
+    );
+  });
+
+  final prefs = await SharedPreferences.getInstance();
+  final practitionerId = prefs.getInt('practitioner_id');
+
+  if (practitionerId == null) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Practitioner not found — please log in again.")),
+    );
+    return;
+  }
+
+  // 2) Save JSON
+  final folderPath = _localReport['folder_path'];
+  if (folderPath != null && folderPath.toString().isNotEmpty) {
+    await storage.savePatientInfoJson({
+      'patient_id': patientId,
+      'practitioner_id': practitionerId,
+      'name': nameCtrl.text.trim(),
+      'birthday': birthdayCtrl.text.trim(),
+      'age': age,
+      'gender': genderCtrl.text.trim(),
+      'folder_path': folderPath,
+      'symptoms': _localReport['symptoms'] ?? '',
+    });
+  }
+
+  // 3) Refresh state
+  if (!context.mounted) return;
+  setState(() {
+    _localReport['name'] = nameCtrl.text.trim();
+    _localReport['gender'] = genderCtrl.text.trim();
+    _localReport['birthday'] = birthdayCtrl.text.trim();
+    _localReport['age'] = age; // ✅ NEW
+  });
+
+  if (context.mounted) Navigator.pop(context);
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text("Patient info updated.")),
+  );
+}
+            dirty = false;
+            }
+            : null,
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // -------- Export PDF --------
+
   Future<void> _handleExportPdf() async {
     if (_melPng == null) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text("Generate Spectrogram First"),
-          content: const Text(
-              "Please generate the Mel-Spectrogram before exporting the report to PDF."),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Cancel")),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Theme.of(context).cardColor,
-              ),
-              child: const Text("Generate Now"),
-              onPressed: () {
-                Navigator.pop(context);
-                _generateMelIfNeeded();
-              },
-            ),
-          ],
-        ),
-      );
-      return;
+      await _generateMelIfNeeded();
+      if (_melPng == null) {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text("Generate Spectrogram First"),
+            content: const Text("Please generate the Mel-Spectrogram before exporting the report to PDF."),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Close")),
+            ],
+          ),
+        );
+        return;
+      }
     }
 
-    final practitioner = await DatabaseHelper.instance
-    .getPractitionerByName(_practitionerName);
+    final practitioner = await DatabaseHelper.instance.getPractitionerByName(_practitionerName);
+    if (!mounted) return;
     final consent = practitioner?['consent_agreed'] == 1;
-    final email = practitioner?['email'] ?? '';   
+    final email   = practitioner?['email'] ?? '';
 
     await PdfExporter.exportSingleReport(
+      context: context,
       report: {
         'patient_id': _localReport['patient_id'],
         'name': _localReport['name'],
@@ -265,7 +469,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
         'probabilities': _currentProbabilities,
         'practitioner_email': email,
         'consent_agreed': consent,
-        'mel_png': _melPng, 
+        'mel_png': _melPng,
       },
       practitionerName: _practitionerName,
       practitionerConsent: consent,
@@ -301,8 +505,45 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
           PopupMenuButton<String>(
             icon: Icon(Icons.more_vert,
                 color: Theme.of(context).colorScheme.surface),
-            onSelected: (value) {
-              if (value == 'reanalyze') _reAnalyze();
+            onSelected: (value) async {
+              final db = DatabaseHelper.instance;
+              final storage = StorageService();
+              if (value == 'reanalyze') {
+                _reAnalyze();
+              } else if (value == 'edit') {
+                await _showEditDialog(context, db, storage);
+              } else if (value == 'delete') {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text("Confirm Delete"),
+                    content: const Text("Are you sure you want to delete this report?"),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text("Cancel"),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                        ),
+                        child: const Text("Delete"),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  await storage.deleteRecordFiles(_localReport['file_path']);
+                  await db.deleteRecordById(_localReport['record_id']);
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("🗑 Report deleted.")),
+                  );
+                  Navigator.pop(context, true);
+                }
+              }
             },
             itemBuilder: (context) => const [
               PopupMenuItem(
@@ -313,11 +554,34 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
                   Text("Re-analyze"),
                 ]),
               ),
+              PopupMenuItem(
+                value: 'edit',
+                child: Row(children: [
+                  Icon(Icons.edit, color: AppColors.deep),
+                  SizedBox(width: 8),
+                  Text("Edit Patient Info"),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(children: [
+                  Icon(Icons.delete, color: AppColors.warning),
+                  SizedBox(width: 8),
+                  Text("Delete"),
+                ]),
+              ),
             ],
           ),
         ],
       ),
-      body: SingleChildScrollView(
+      body: _isReanalyzing
+          ? const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: CircularProgressIndicator(),
+            ),
+          )
+      : SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child:
             Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -346,7 +610,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     );
   }
 
-  // 🧱 Detail Section
+  // Detail Section
   Widget _buildDetailSection(String patientIdFormatted, String dateString) {
     return Card(
       elevation: 2,
@@ -395,7 +659,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     );
   }
 
-  // 🤖 AI Analysis Section
+  // AI Analysis Section
   Widget _buildAnalysisSection() {
     final sortedEntries = _currentProbabilities.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
@@ -438,7 +702,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     );
   }
 
-  // 📊 Probability Row
+  // Probability Row
   Widget _buildProbabilityRow(String label, double value,
       {bool highlight = false}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -485,7 +749,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     );
   }
 
-  // 🎨 Spectrogram Section
+  // Spectrogram Section
   Widget _buildSpectrogramSection() {
     return Card(
       elevation: 2,
@@ -515,7 +779,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
-                    foregroundColor: Theme.of(context).cardColor),
+                    foregroundColor: Colors.white),
                 onPressed: _generateMelIfNeeded,
                 child: const Text('Generate Spectrogram'),
               ),
@@ -525,7 +789,7 @@ class _ReportDetailPageState extends State<ReportDetailPage> {
     );
   }
 
-  // 🔊 Waveform Section
+  // Waveform Section
   Widget _buildWaveformSection() {
     return Card(
       elevation: 2,

@@ -4,11 +4,12 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:cardioscope_app/pages/pdf_viewer_page.dart';
+import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/utils/latency_debug.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -24,6 +25,7 @@ class PdfExporter {
   // SINGLE REPORT
   // --------------------------------------------------------------------------
   static Future<void> exportSingleReport({
+    required BuildContext context,
     required Map<String, dynamic> report,
     required String practitionerName,
     bool practitionerConsent = false,
@@ -65,13 +67,13 @@ class PdfExporter {
                 logo,
                 practitionerEmail: report['practitioner_email'] ?? '',
                 practitionerConsent: practitionerConsent,
-              ),
+                ),
               pw.SizedBox(height: 12),
               _buildReportContent(
-                  report: report,
-                  melImage: melSpecImage,
-                  waveformSamples: waveformSamples,
-                ),
+                report: report,
+                melImage: melSpecImage,
+                waveformSamples: waveformSamples,
+              ),
               pw.Spacer(),
               _buildFooter(context),
             ],
@@ -79,18 +81,52 @@ class PdfExporter {
         ),
       );
 
-    final dir = await getTemporaryDirectory();
-    final file = File(
-      "${dir.path}/CardioScope_Report_${DateTime.now().millisecondsSinceEpoch}.pdf",
+    // ✅ Save inside Downloads/CardioScope/Practitioner/.../Reports
+try {
+  final storage = StorageService();
+  final basePath = await storage.getOrCreateBaseFolder();
+
+  final patientId = report['patient_id'] ?? 0;
+  final formattedId = DatabaseHelper.instance.formatPatientId(patientId);
+  final pdfDir = await storage.getSinglePdfDir(basePath, formattedId);
+
+  final patientName = (report['name'] ?? 'Patient').toString().replaceAll(RegExp(r'\s+'), '_');
+  final ts = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+  final filePath = '$pdfDir/Report_${formattedId}_${patientName}_$ts.pdf';
+
+  final file = File(filePath);
+  await file.writeAsBytes(await pdf.save());
+
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('✅ Saved to: $filePath')),
     );
-    await file.writeAsBytes(await pdf.save());
-    await Share.shareXFiles([XFile(file.path)], text: "CardioScope Report");
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PdfViewerPage(
+          filePath: file.path,
+          title: 'Report for ${report['name'] ?? 'Patient'}',
+        ),
+      ),
+    );
   }
+
+  await Share.shareXFiles([XFile(file.path)], text: "CardioScope Report");
+} catch (e) {
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('❌ Failed to save PDF: $e')),
+    );
+  }
+}
+}
 
   // --------------------------------------------------------------------------
   // ✅ BATCH REPORTS 
   // --------------------------------------------------------------------------
   static Future<void> exportBatchReports({
+    required BuildContext context,
     required List<Map<String, dynamic>> reports,
     required String practitionerName,
     bool practitionerConsent = false,
@@ -138,17 +174,44 @@ class PdfExporter {
 
     LatencyDebug.mark("📄 PDF-Batch", "All ${reports.length} pages built");
 
-    final dir = await getTemporaryDirectory();
-    final startDate = DateFormat('yyyy-MM-dd').format(dateRange.start);
-    final endDate = DateFormat('yyyy-MM-dd').format(dateRange.end);
-    final filename =
-        "CardioScope_Batch_${practitionerName.replaceAll(' ', '_')}_${startDate}_to_$endDate.pdf";
+    // ✅ Save inside Downloads/CardioScope/Practitioner/.../Batch_Report
+    try {
+      final storage = StorageService();
+      final basePath = await storage.getOrCreateBaseFolder();
 
-    final file = File("${dir.path}/$filename");
-    await file.writeAsBytes(await pdf.save());
+      final pdfDir = await storage.getBatchPdfDir(basePath);
 
-    LatencyDebug.end("📄 PDF-Batch", "Batch PDF ready: ${file.path}");
-    await Share.shareXFiles([XFile(file.path)], text: "CardioScope Batch Reports");
+      final startDate = DateFormat('yyyyMMdd').format(dateRange.start);
+      final endDate = DateFormat('yyyyMMdd').format(dateRange.end);
+      final filename =
+          "Batch_Report_${startDate}_to_$endDate.pdf";
+
+      final file = File("$pdfDir/$filename");
+      await file.writeAsBytes(await pdf.save());
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('✅ Batch PDF saved to: ${file.path}')),
+        );
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PdfViewerPage(
+              filePath: file.path,
+              title: 'Batch Reports (${reports.length})',
+            ),
+          ),
+        );
+      }
+
+      await Share.shareXFiles([XFile(file.path)], text: "CardioScope Batch Reports");
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Failed to save batch PDF: $e')),
+        );
+      }
+    }
   }
 
   // --------------------------------------------------------------------------

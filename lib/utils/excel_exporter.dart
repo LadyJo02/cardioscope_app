@@ -5,14 +5,16 @@ import 'dart:io';
 import 'package:cardioscope_app/services/storage_service.dart';
 import 'package:cardioscope_app/utils/latency_debug.dart';
 import 'package:excel/excel.dart';
-import 'package:flutter/material.dart' show DateTimeRange;
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../database_helper.dart';
+import '../pages/excel_viewer_page.dart';
 
 class ExcelExporter {
   static Future<void> exportReportsToExcel({
+    required BuildContext context,
     required List<Map<String, dynamic>> reports,
     required String practitionerName,
     required DateTimeRange dateRange,
@@ -24,7 +26,7 @@ class ExcelExporter {
     final Sheet sheet = excel['Cardioscope Records'];
 
     final headerRow = [
-      "Practitioner", "Patient ID", "Patient Name", "Age", "Gender",
+      "Practitioner", "Practitioner Email", "Clinic/Facility", "Patient ID", "Patient Name", "Age", "Gender", "Symptoms",
       "Record Date", "Diagnosis", "Confidence (%)", "MR Prob (%)",
       "MS Prob (%)", "MVP Prob (%)", "N Prob (%)"
     ];
@@ -50,37 +52,55 @@ class ExcelExporter {
         } catch (_) {}
       }
 
+      excel.setDefaultSheet('Cardioscope Records');
       sheet.appendRow([
-        practitionerName,
-        patientIdFormatted,
-        report['name'] ?? 'N/A',
-        report['age'] as int? ?? 0,
-        report['gender'] ?? 'N/A',
-        recordDateStr,
-        diagnosis,
-        (confidence * 100),
-        ((probs['MR'] as num?)?.toDouble() ?? 0.0) * 100,
-        ((probs['MS'] as num?)?.toDouble() ?? 0.0) * 100,
-        ((probs['MVP'] as num?)?.toDouble() ?? 0.0) * 100,
-        ((probs['N'] as num?)?.toDouble() ?? 0.0) * 100,
+        practitionerName,                              // Practitioner
+        report['practitioner_email'] ?? 'N/A',         // Practitioner Email 
+        report['clinic_name'] ?? 'N/A',                // Clinic/Facility 
+        patientIdFormatted,                            // Patient ID
+        report['name'] ?? 'N/A',                       // Patient Name
+        report['age'] ?? '',                           // Age
+        report['gender'] ?? 'N/A',                     // Gender
+        report['symptoms'] ?? 'N/A',                   // Symptoms
+        recordDateStr,                                 // Record Date
+        diagnosis,                                     // Diagnosis
+        (confidence * 100),                            // Confidence
+        ((probs['MR'] as num?)?.toDouble() ?? 0) * 100,
+        ((probs['MS'] as num?)?.toDouble() ?? 0) * 100,
+        ((probs['MVP'] as num?)?.toDouble() ?? 0) * 100,
+        ((probs['N'] as num?)?.toDouble() ?? 0) * 100,
       ]);
     }
     LatencyDebug.mark("📊 Excel", "All rows added");
 
     final storage = StorageService();
     final basePath = await storage.getOrCreateBaseFolder();
-    final dirPath = await storage.createReportsFolder(basePath);
+    final excelDir = await storage.getBatchExcelDir(basePath);
 
     final startDate = DateFormat('yyyy-MM-dd').format(dateRange.start);
     final endDate = DateFormat('yyyy-MM-dd').format(dateRange.end);
     final filename = "CardioScope_Export_${practitionerName.replaceAll(' ', '_')}_${startDate}_to_$endDate.xlsx";
     
-    final file = File("$dirPath/$filename");
+    final file = File("$excelDir/$filename");
 
     final fileBytes = excel.save();
     if (fileBytes != null) {
-      await file.writeAsBytes(fileBytes);
+      await file.writeAsBytes(List<int>.from(fileBytes));
       LatencyDebug.end("📊 Excel", "Excel file saved: ${file.path}");
+
+
+    if (context.mounted) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExcelViewerPage(
+          filePath: file.path,
+          title: 'Excel Export',
+        ),
+      ),
+    );
+  }
+
       await Share.shareXFiles([XFile(file.path)], text: "CardioScope Excel Export");
     }
   }

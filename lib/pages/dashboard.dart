@@ -1,4 +1,6 @@
+// 📄 lib/pages/dashboard.dart
 import 'package:cardioscope_app/database_helper.dart';
+import 'package:cardioscope_app/pages/reports.dart';
 import 'package:cardioscope_app/pages/reports_detail.dart';
 import 'package:cardioscope_app/utils/app_colors.dart';
 import 'package:cardioscope_app/utils/ui_helpers.dart';
@@ -15,7 +17,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin, RouteAware {
   final db = DatabaseHelper.instance;
   List<Map<String, dynamic>> allReports = [];
 
@@ -36,6 +38,26 @@ class _DashboardPageState extends State<DashboardPage>
   void initState() {
     super.initState();
     _loadGreetingAndName();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      routeObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void dispose() {
+    routeObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    _loadData(); // ✅ refresh on return to dashboard
   }
 
   Future<void> _loadGreetingAndName() async {
@@ -66,17 +88,15 @@ class _DashboardPageState extends State<DashboardPage>
 
     final now = DateTime.now();
     final weekAgo = now.subtract(const Duration(days: 7));
+
     final tot = data.length;
     final thisWeek = data.where((r) {
-      try {
-        final dateStr = r['record_date'] ?? r['analysis_date'];
-        if (dateStr is String) {
-          return DateTime.parse(dateStr).isAfter(weekAgo);
-        }
-        return false;
-      } catch (_) {
-        return false;
+      final dateStr = r['record_date'] ?? r['analysis_date'];
+      if (dateStr is String) {
+        final dt = DateTime.tryParse(dateStr);
+        return dt != null && dt.isAfter(weekAgo);
       }
+      return false;
     }).length;
 
     todayCount = data.where((r) {
@@ -115,12 +135,11 @@ class _DashboardPageState extends State<DashboardPage>
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: AppColors.primary,
-          foregroundColor: Theme.of(context).colorScheme.onPrimary,
+          foregroundColor: Colors.white,
           title: const Text('Dashboard'),
           actions: [
             IconButton(
-              icon: Icon(Icons.settings,
-                  color: Theme.of(context).colorScheme.onPrimary),
+              icon: const Icon(Icons.settings, color: Colors.white),
               onPressed: () => Navigator.pushNamed(context, '/settings'),
             ),
           ],
@@ -146,8 +165,8 @@ class _DashboardPageState extends State<DashboardPage>
                 _buildRecentPatientsHeader(),
                 const SizedBox(height: 8),
                 if (recentPatients.isEmpty)
-                  _placeholderCard(
-                      Icons.inbox_rounded, 'No recent patient screenings.')
+                  _placeholderCard(Icons.inbox_rounded,
+                      'No recent patient screenings.')
                 else
                   ...recentPatients.map((p) => _buildPatientTile(p)),
                 const SizedBox(height: 24),
@@ -181,6 +200,8 @@ class _DashboardPageState extends State<DashboardPage>
       ),
     );
   }
+
+
 
   // --- Helper Widgets ---
 

@@ -3,8 +3,10 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  flutter_secure_storage_linux
   printing
   record_linux
+  syncfusion_pdfviewer_linux
   url_launcher_linux
 )
 

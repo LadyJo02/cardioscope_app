@@ -21,6 +21,9 @@ class AppColors {
   static const Color warning = Color(0xFFA03232);
   static const Color success = Color(0xFF2E7D32);
 
+  static const Color error = Color(0xFFB3261E);
+  static const Color onError = Colors.white;
+
   // 📝 Text
   static const Color textPrimary = Color(0xFF172737);
   static const Color textSecondary = Color(0xFF51848F);

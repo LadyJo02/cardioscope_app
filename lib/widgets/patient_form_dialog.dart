@@ -1,4 +1,4 @@
-//lib\widgets\patient_form_dialog.dart
+// 📁 lib/widgets/patient_form_dialog.dart
 import 'dart:developer' as developer;
 
 import 'package:cardioscope_app/utils/app_colors.dart';
@@ -9,7 +9,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../database_helper.dart';
 import '../services/storage_service.dart';
-
 
 class PatientFormDialog extends StatefulWidget {
   final bool isSwitchMode;
@@ -54,7 +53,6 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
     return age;
   }
 
-  /// ✅ Live smart search with substring match
   Future<List<String>> _getSuggestions(String pattern) async {
     if (pattern.trim().isEmpty) return [];
     final results = await db.getPatientSuggestions(pattern.trim());
@@ -63,7 +61,7 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
         .toList();
   }
 
-  Future<Map<String, dynamic>?> _getPatientDetails(String name) async {
+  Future<Map<String, dynamic>?> _getPatient(String name) async {
     return await db.getPatientDetails(name);
   }
 
@@ -86,92 +84,82 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
     }
   }
 
-
   Future<void> _submit() async {
-  developer.log("🩺 Attempting to submit patient form...");
+    if (!_formKey.currentState!.validate()) return;
 
-  if (!_formKey.currentState!.validate()) {
-    developer.log("❌ Validation failed!");
-    return;
-  }
+    final name = _nameController.text.trim();
+    final birthday = _birthdayController.text.trim();
+    final gender = _selectedGender ?? 'Unspecified';
+    final age = _selectedDate != null ? _calculateAge(_selectedDate!) : null;
+    final symptoms = _symptomsController.text.trim();
 
-  developer.log("✅ Validation passed, continuing...");
+    final prefs = await SharedPreferences.getInstance();
+    final practitionerId = prefs.getInt('practitioner_id') ?? 1;
 
-  final name = _nameController.text.trim();
-  final birthday = _birthdayController.text.trim();
-  final gender = _selectedGender ?? 'Unspecified';
-  final age = _selectedDate != null ? _calculateAge(_selectedDate!) : null;
-  final symptoms = _symptomsController.text.trim();
+    final patientData = {
+      'name': name,
+      'birthday': birthday,
+      'age': age,
+      'gender': gender,
+      'symptoms': symptoms,
+    };
 
-  final basePath = await storage.getSavedPath();
-  if (basePath == null || basePath.isEmpty) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Please select a base folder first.')),
-    );
-    return;
-  }
-
-
-  final prefs = await SharedPreferences.getInstance();
-  final practitionerId = prefs.getInt('practitioner_id') ?? 1;
-
-  // --- Build patient data map ---
-  final patientData = {
-    'name': name,
-    'birthday': birthday,
-    'age': age,
-    'gender': gender,
-    'symptoms': symptoms,
-  };
-
-  // ✅ If patient exists, update their info — including symptoms
-  final existing = await db.getPatientDetails(name);
-  int patientId;
-  if (existing != null) {
-    // Update existing patient
-    await db.database.then((conn) {
-      conn.update(
-        'patients',
-        patientData,
-        where: 'patient_id = ?',
-        whereArgs: [existing['patient_id']],
+    final basePath = await storage.getSavedPath();
+    if (basePath == null || basePath.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Storage not ready. Please restart app.')),
       );
+      return;
+    }
+
+    final existing = await _getPatient(name);
+    int patientId;
+    String folderPath = "";
+
+    if (existing != null) {
+      patientId = existing['patient_id'];
+      folderPath = existing['folder_path'] ?? "";
+
+      await db.database.then((conn) {
+        conn.update(
+          'patients',
+          patientData,
+          where: 'patient_id = ?',
+          whereArgs: [patientId],
+        );
+      });
+
+      if (folderPath.isEmpty) {
+        folderPath = await storage.createPatientSubfolders(basePath, patientId);
+        await db.updatePatientFolderPath(patientId, folderPath);
+      }
+
+      developer.log("🔄 Updated patient $patientId");
+    } else {
+      patientId = await db.findOrCreatePatient(practitionerId, patientData);
+      folderPath = await storage.createPatientSubfolders(basePath, patientId);
+      await db.updatePatientFolderPath(patientId, folderPath);
+
+      developer.log("🆕 New patient $patientId");
+    }
+
+    await storage.setCurrentPatient(patientId);
+
+    if (!mounted) return;
+    Navigator.pop(context, {
+      'patient_id': patientId,
+      ...patientData,
+      'folder_path': folderPath,
     });
-    patientId = existing['patient_id'];
-    developer.log("🔄 Updated existing patient ID: $patientId");
-  } else {
-    // Create new patient
-    patientId = await db.findOrCreatePatient(practitionerId, patientData);
-    developer.log("🆕 Created new patient ID: $patientId");
   }
-
-  // --- Create subfolders for patient ---
-  final patientFolder = await storage.createPatientSubfolders(basePath, patientId);
-  await db.updatePatientFolderPath(patientId, patientFolder);
-  await storage.setCurrentPatient(patientId);
-
-  developer.log("✅ Patient folder created at: $patientFolder");
-  if (!mounted) return;
-
-  Navigator.of(context).pop({
-    'patient_id': patientId,
-    ...patientData,
-    'folder_path': patientFolder,
-  });
-}
-
-
-    
 
   @override
   Widget build(BuildContext context) {
-    final isSwitchMode = widget.isSwitchMode;
-
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Text(
-        isSwitchMode ? 'Switch Patient' : 'Patient Information',
+        widget.isSwitchMode ? 'Switch Patient' : 'Patient Information',
         style: const TextStyle(fontWeight: FontWeight.w600),
       ),
       content: SingleChildScrollView(
@@ -180,7 +168,6 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              /// ✅ TypeAheadField (v5.2.0 compatible, live & smart)
               TypeAheadField<String>(
                 debounceDuration: const Duration(milliseconds: 100),
                 suggestionsCallback: _getSuggestions,
@@ -195,17 +182,16 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
                     autofocus: true,
                     decoration: InputDecoration(
                       labelText: 'Patient Name',
-                      hintText: 'e.g., Dela Cruz, Juan A.',
+                      hintText: 'e.g., Juan Dela Cruz',
                       suffixIcon: _isExistingPatient
                           ? IconButton(
-                              icon: const Icon(Icons.edit,
-                                  color: AppColors.primary),
-                              tooltip: 'Edit name (create new patient)',
+                              icon: const Icon(Icons.edit, color: AppColors.primary),
                               onPressed: () {
                                 setState(() {
                                   _isExistingPatient = false;
                                   _nameController.clear();
                                   _birthdayController.clear();
+                                  _symptomsController.clear();
                                   _selectedGender = null;
                                   _selectedDate = null;
                                   _calculatedAge = null;
@@ -214,80 +200,36 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
                             )
                           : null,
                     ),
-                    onChanged: (value) {
-                      setState(() {}); // live rebuild for suggestions
-                    },
-                    validator: (value) =>
-                        value == null || value.isEmpty ? 'Enter a name' : null,
+                    validator: (v) => v == null || v.isEmpty ? 'Enter a name' : null,
+                    onChanged: (_) => setState(() {}),
                   );
                 },
-                itemBuilder: (context, String suggestion) {
-                  return ListTile(
-                    leading: const Icon(Icons.person_outline,
-                        color: AppColors.primary),
-                    title: Text(suggestion),
-                  );
-                },
-                onSelected: (String suggestion) async {
+                itemBuilder: (_, suggestion) =>
+                    ListTile(title: Text(suggestion)),
+                onSelected: (suggestion) async {
+                  final data = await _getPatient(suggestion);
                   _nameController.text = suggestion;
-                  final data = await _getPatientDetails(suggestion);
-                  if (data != null && mounted) {
-                    setState(() {
-                      _isExistingPatient = true;
-                      _birthdayController.text = data['birthday'] ?? '';
-                      _selectedGender = data['gender'];
-                      if (data['birthday'] != null &&
-                          data['birthday'].toString().isNotEmpty) {
-                        final parsed =
-                            DateTime.tryParse(data['birthday'].toString());
-                        if (parsed != null) {
-                          _selectedDate = parsed;
-                          _calculatedAge = _calculateAge(parsed);
-                      _symptomsController.text = data['symptoms'] ?? '';
-                          
-                        }
+
+                  setState(() {
+                    _isExistingPatient = true;
+                    _birthdayController.text = data?['birthday'] ?? '';
+                    _symptomsController.text = data?['symptoms'] ?? '';
+                    _selectedGender = data?['gender'];
+
+                    if (data?['birthday'] != null && data!['birthday'].toString().isNotEmpty) {
+                      final parsed = DateTime.tryParse(data['birthday']);
+                      if (parsed != null) {
+                        _selectedDate = parsed;
+                        _calculatedAge = _calculateAge(parsed);
                       }
-                    });
-                  }
-                },
-                emptyBuilder: (context) {
-                  final name = _nameController.text.trim();
-                  if (name.isEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text('Start typing a name...'),
-                    );
-                  }
-                  return ListTile(
-                    leading: const Icon(Icons.add_circle_outline,
-                        color: AppColors.primary),
-                    title: Text('Add "$name" as new patient'),
-                    onTap: () async {
-                      setState(() {
-                        _isExistingPatient = false;
-                        _nameController.text = name;
-                        _birthdayController.clear();
-                        _selectedGender = null;
-                        _selectedDate = null;
-                        _calculatedAge = null;
-                      });
-
-                      if (!mounted) return;
-                      FocusScope.of(context).unfocus();
-
-                      Future.delayed(const Duration(milliseconds: 150));
-                      if (!mounted) return;
-                      FocusScope.of(context).requestFocus(FocusNode());
-                    },
-                  );
+                    }
+                  });
                 },
               ),
 
               const SizedBox(height: 12),
 
-              /// 🎂 Birthday + Age
               Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Expanded(
                     child: TextFormField(
@@ -298,27 +240,22 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
                         labelText: 'Birthday',
                         suffixIcon: Icon(Icons.calendar_today_rounded),
                       ),
-                      validator: (value) => value == null || value.isEmpty
-                          ? 'Select birthday'
-                          : null,
+                      validator: (v) => v == null || v.isEmpty ? 'Select birthday' : null,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   if (_calculatedAge != null)
-                    Text(
-                      "Age: $_calculatedAge",
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Colors.black54,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    Text("Age: $_calculatedAge",
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black54,
+                        )),
                 ],
               ),
 
               const SizedBox(height: 12),
 
-              /// ⚧️ Gender
               DropdownButtonFormField<String>(
                 initialValue: _selectedGender,
                 decoration: const InputDecoration(labelText: 'Gender'),
@@ -326,30 +263,27 @@ class _PatientFormDialogState extends State<PatientFormDialog> {
                   DropdownMenuItem(value: 'Male', child: Text('Male')),
                   DropdownMenuItem(value: 'Female', child: Text('Female')),
                 ],
-                onChanged: (val) => setState(() => _selectedGender = val),
-                validator: (val) =>
-                    val == null ? 'Please select gender' : null,
+                onChanged: (v) => setState(() => _selectedGender = v),
+                validator: (v) => v == null ? 'Please select gender' : null,
               ),
 
               const SizedBox(height: 12),
-              
+
               TextFormField(
                 controller: _symptomsController,
                 maxLines: 2,
                 decoration: const InputDecoration(
                   labelText: 'Symptoms',
-                  hintText: 'e.g., shortness of breath, chest pain, palpitations',
+                  hintText: 'Shortness of breath, chest pain, etc.',
                 ),
               ),
             ],
           ),
         ),
       ),
-
-
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(null),
+          onPressed: () => Navigator.pop(context, null),
           child: const Text('Cancel'),
         ),
         ElevatedButton(

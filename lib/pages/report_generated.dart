@@ -92,19 +92,28 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     final bytes = await file.readAsBytes();
     if (bytes.lengthInBytes <= 44) return [];
 
-    final pcmBytes = bytes.sublist(44);
-    final byteData = ByteData.view(pcmBytes.buffer);
-    final spots = <FlSpot>[];
-    const int downsamplingFactor = 50;
-
-    for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsamplingFactor)) {
-      if (i + 2 <= pcmBytes.lengthInBytes) {
-        final sample = byteData.getInt16(i, Endian.little) / 32768.0;
-        spots.add(FlSpot((i / 2).toDouble(), sample));
-      }
+  // Find 'data' chunk safely (not always at 44 bytes)
+  int dataOffset = 44;
+  for (int i = 0; i < bytes.length - 4; i++) {
+    if (bytes[i] == 0x64 && bytes[i + 1] == 0x61 && bytes[i + 2] == 0x74 && bytes[i + 3] == 0x61) {
+      dataOffset = i + 8;
+      break;
     }
-    return spots;
   }
+
+  final pcmBytes = bytes.sublist(dataOffset);
+  final byteData = ByteData.view(pcmBytes.buffer);
+  final spots = <FlSpot>[];
+  const int downsamplingFactor = 50;
+
+  for (int i = 0; i < pcmBytes.lengthInBytes; i += (2 * downsamplingFactor)) {
+    if (i + 2 <= pcmBytes.lengthInBytes) {
+      final sample = byteData.getInt16(i, Endian.little) / 32768.0;
+      spots.add(FlSpot((i / 2).toDouble(), sample.toDouble()));
+    }
+  }
+  return spots;
+}
 
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
@@ -127,12 +136,12 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       }
     }
 
-    // 🔽 Sort probabilities descending once
+    // Sort probabilities descending once
     final sortedProbs = widget.probabilities.entries.toList()
-      ..sort((a, b) => 
+      ..sort((a, b) =>
           (double.tryParse(b.value.toString()) ?? 0)
               .compareTo(double.tryParse(a.value.toString()) ?? 0));
-    
+
     debugPrint("🔍 Sorted probabilities: $sortedProbs");
 
     return Scaffold(
@@ -163,7 +172,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           ),
           const SizedBox(height: 16),
 
-          // 🩺 Patient Details
+          // Patient Details
           _buildCard(
             title: 'Patient Details',
             child:
@@ -183,7 +192,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           ),
           const SizedBox(height: 16),
 
-          // 🤖 AI Analysis
+          // AI Analysis
           _buildCard(
             title: 'AI Analysis',
             child:
@@ -207,9 +216,12 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
               else
                 ...sortedProbs.asMap().entries.map((entry) {
                   final isTop = entry.key == 0;
+                  final v = (entry.value.value is num)
+                      ? (entry.value.value as num).toDouble()
+                      : (double.tryParse(entry.value.value.toString()) ?? 0.0);
                   return _buildProbabilityRow(
                     entry.value.key,
-                    (entry.value.value as num).toDouble(),
+                    v,
                     highlight: isTop,
                   );
                 }),
@@ -217,7 +229,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           ),
           const SizedBox(height: 16),
 
-          // 🎨 Model Input (Mel-Spectrogram)
+          // Model Input (Mel-Spectrogram)
           _buildCard(
             title: 'Model Input (Mel-Spectrogram)',
             child: widget.melPngBytes != null
@@ -246,7 +258,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
           ),
           const SizedBox(height: 16),
 
-          // 🔊 Raw Waveform & Playback
+          // Raw Waveform & Playback
           _buildCard(
             title: 'Raw Waveform & Playback',
             child:
@@ -292,13 +304,15 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
-
           final practitioner = await DatabaseHelper.instance
               .getPractitionerByName(_practitionerName);
+
+          if (!mounted) return;
+
           final consent = practitioner?['consent_agreed'] == 1;
           final email = practitioner?['email'] ?? '';
-          
-          // 🧠 Force-generate spectrogram if null
+
+          // Force-generate spectrogram if null
           Uint8List? melBytes = widget.melPngBytes;
           if (melBytes == null && File(widget.filePath).existsSync()) {
             try {
@@ -307,8 +321,17 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
               debugPrint("⚠️ Could not generate spectrogram: $e");
             }
           }
-          
+
+        Map<String, double> asDoubleMap(Map<String, dynamic> src) {
+  return src.map((k, v) => MapEntry(
+      k,
+      (v is num) ? v.toDouble() : double.tryParse('$v') ?? 0.0,
+  ));
+}
+
+          if (!context.mounted) return;
           await PdfExporter.exportSingleReport(
+            context: context,
             report: {
               'patient_id': widget.patientId,
               'name': widget.patientName,
@@ -319,7 +342,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
               'file_path': widget.filePath,
               'record_date': widget.recordedDate.toIso8601String(),
               'diagnosis': widget.classification,
-              'probabilities': widget.probabilities,
+              'probabilities': asDoubleMap(widget.probabilities),
               'practitioner_email': email,
               'consent_agreed': consent,
               'mel_png': melBytes,
@@ -344,7 +367,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     );
   }
 
-  // 🧱 CARD BUILDER
+  // Card builder
   Widget _buildCard({required String title, required Widget child}) {
     return Card(
       elevation: 2,
@@ -365,7 +388,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     );
   }
 
-  // 🎧 AUDIO PLAYER CONTROLS
+  // Audio player controls
   Widget _buildPlaybackControls() {
     return StreamBuilder<PlayerState>(
       stream: _player.playerStateStream,
@@ -409,15 +432,16 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
                 stream: _player.durationStream,
                 builder: (context, snapshot) {
                   final duration = snapshot.data ?? Duration.zero;
+                  final maxMs = duration.inMilliseconds.toDouble();
+                  final safeMax = (maxMs.isFinite && maxMs > 0) ? maxMs : 1.0;
+                  final value = _player.position.inMilliseconds
+                      .toDouble()
+                      .clamp(0.0, maxMs.isFinite ? maxMs : 0.0);
                   return Slider(
-                    value: _player.position.inMilliseconds
-                        .toDouble()
-                        .clamp(0.0, duration.inMilliseconds.toDouble()),
-                    onChanged: (value) {
-                      _player.seek(Duration(milliseconds: value.toInt()));
-                    },
+                    value: value.isFinite ? value : 0.0,
+                    onChanged: (v) => _player.seek(Duration(milliseconds: v.toInt())),
                     min: 0.0,
-                    max: duration.inMilliseconds.toDouble(),
+                    max: safeMax,
                     activeColor: AppColors.primary,
                     inactiveColor: Colors.grey.shade300,
                   );
@@ -431,7 +455,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     );
   }
 
-  // 📊 PROBABILITY ROW WITH HIGHLIGHT LOGIC
+  // Probability row with highlight
   Widget _buildProbabilityRow(String label, double value, {bool highlight = false}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -439,7 +463,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
         children: [
-          // LABEL
+          // Label
           Expanded(
             flex: 2,
             child: Text(
@@ -454,7 +478,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
             ),
           ),
 
-          // PROGRESS BAR
+          // Progress bar
           Expanded(
             flex: 5,
             child: LinearProgressIndicator(
@@ -467,7 +491,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
             ),
           ),
 
-          // PERCENTAGE
+          // Percentage
           Expanded(
             flex: 2,
             child: Text(
@@ -486,7 +510,7 @@ class _ReportGeneratedPageState extends State<ReportGeneratedPage> {
     );
   }
 
-  // 🩺 DETAIL ROW BUILDER
+  // Detail row
   Widget _buildDetailRow(String label, String value, {bool isSelectable = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),

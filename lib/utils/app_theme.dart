@@ -36,6 +36,9 @@ class AppTheme {
       surface: AppColors.scaffoldBackground,
       onSurface: Colors.black87,
       secondary: AppColors.deep,
+
+      error: AppColors.error,
+      onError: AppColors.onError,
     ),
   );
 
@@ -63,6 +66,9 @@ class AppTheme {
       surface: AppColors.darkSurface,
       onSurface: Colors.white70,
       secondary: AppColors.deep,
+
+      error: AppColors.error,
+      onError: AppColors.onError,
     ),
   );
 }
