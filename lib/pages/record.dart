@@ -659,94 +659,88 @@ bd.setUint32(40, fiveSecBytes.length, Endian.little);      // data chunk size
 
   @override
   Widget build(BuildContext context) {
-    final instruction = _isRecording
-        ? "Recording... (5s)"
-        : "Tap to record";
-
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        title: const Text("Record Heart Sound"),
-        actions: [
-          IconButton(
-            tooltip: "Import WAV file",
-            icon: const Icon(Icons.upload_file_rounded),
-            onPressed: _isProcessing ? null : _pickWavFile,
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+  return Scaffold( // ← return Scaffold, not just body:
+    appBar: AppBar(
+      backgroundColor: AppColors.primary,
+      foregroundColor: Colors.white,
+      title: const Text("Record Heart Sound"),
+    ),
+    
+  body: SafeArea(
+    child: SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             _buildReceiverStatusBanner(),
             const SizedBox(height: 8),
             _buildPatientInfoCard(),
             const SizedBox(height: 8),
 
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _isRecording
-                    ? _buildRecordingView()
-                    : _buildGuidelinesView(),
+            // ✅ Dynamic area (either waveform or guidelines)
+            _isRecording
+                ? SizedBox(height: 400, child: _buildRecordingView())
+                : _buildGuidelinesView(),
+
+            const SizedBox(height: 32),
+
+            // ✅ Mic Button
+            Hero(
+              tag: "record_button_hero",
+              child: Opacity(
+                opacity: _isProcessing ? 0.5 : 1,
+                child: GestureDetector(
+                  onTap: _isProcessing ? null : _toggleRecording,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    width: 125,
+                    height: 125,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.18),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: _isProcessing
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : Icon(
+                              _isRecording
+                                  ? Icons.stop_rounded
+                                  : Icons.mic_rounded,
+                              size: 60,
+                              color: Colors.white,
+                            ),
+                    ),
+                  ),
+                ),
               ),
             ),
 
             const SizedBox(height: 10),
 
-            Hero(
-  tag: "record_button_hero",
-  child: Opacity(
-    opacity: _isProcessing ? 0.5 : 1,
-    child: GestureDetector(
-      onTap: _isProcessing ? null : _toggleRecording,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        width: 125,
-        height: 125,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primary,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.18),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
+            Text(
+              _isRecording ? "Recording... (5s)" : "Tap to record",
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
             ),
+
+            const SizedBox(height: 30), // ✅ Extra bottom space to prevent overlap
           ],
-        ),
-        child: Center(
-          child: _isProcessing
-              ? const CircularProgressIndicator(color: Colors.white)
-              : Icon(
-                  _isRecording ? Icons.stop_rounded : Icons.mic,
-                  size: 60,
-                  color: Colors.white,
-                ),
         ),
       ),
     ),
   ),
-),
-
-            const SizedBox(height: 6),
-
-            Text(
-              instruction,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-            ),
-
-            const SizedBox(height: 12),
-          ],
-        ),
-      ),
-    );
+);
   }
 
   Widget _buildReceiverStatusBanner() {

@@ -286,147 +286,195 @@ await db.database.then((conn) {
     }
   }
 
-  Future<void> _showEditDialog(
-    BuildContext context, DatabaseHelper db, StorageService storage) async {
-    
-    bool dirty = false; // track unsaved changes
-    
-    final nameCtrl = TextEditingController(text: _localReport['name'] ?? '');
-    final genderCtrl = TextEditingController(text: _localReport['gender'] ?? '');
-    final birthdayCtrl =
-        TextEditingController(text: _localReport['birthday'] ?? '');
+Future<void> _showEditDialog(
+  BuildContext context,
+  DatabaseHelper db,
+  StorageService storage,
+) async {
+  final nameCtrl    = TextEditingController(text: _localReport['name'] ?? '');
+  final genderCtrl  = TextEditingController(text: _localReport['gender'] ?? '');
+  final birthdayCtrl =
+      TextEditingController(text: _localReport['birthday'] ?? '');
 
-    // Compute age from yyyy-MM-dd (or leave null if invalid)
-int? ageFromBirthday(String ymd) {
-  try {
-    final b = DateTime.parse(ymd);
-    final now = DateTime.now();
-    var age = now.year - b.year;
-    final hasNotHadBirthdayThisYear =
-        (now.month < b.month) || (now.month == b.month && now.day < b.day);
-    if (hasNotHadBirthdayThisYear) age--;
-    return (age >= 0 && age < 130) ? age : null;
-  } catch (_) {
-    return null;
+  bool dirty = false; // local, but will be driven by StatefulBuilder
+
+  int? ageFromBirthday(String ymd) {
+    try {
+      final b = DateTime.parse(ymd);
+      final now = DateTime.now();
+      var age = now.year - b.year;
+      final notHadBirthdayThisYear =
+          (now.month < b.month) ||
+          (now.month == b.month && now.day < b.day);
+      if (notHadBirthdayThisYear) age--;
+      return (age >= 0 && age < 130) ? age : null;
+    } catch (_) {
+      return null;
+    }
   }
-}
 
+  await showDialog(
+    context: context,
+    builder: (dialogContext) {
+      return StatefulBuilder(
+        builder: (dialogContext, setStateDialog) {
+          void markDirty() {
+            if (!dirty) {
+              setStateDialog(() {
+                dirty = true;
+              });
+            }
+          }
 
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Edit Patient Info"),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
-            controller: nameCtrl, 
-            decoration: const InputDecoration(labelText: "Name"),
-            onChanged: (_) => dirty = true, // mark dirty
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: genderCtrl, 
-            decoration: const InputDecoration(labelText: "Gender"),
-            onChanged: (_) => dirty = true, // mark dirty
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: birthdayCtrl,
-            readOnly: true,
-            decoration: const InputDecoration(
-              labelText: "Birthday",
-              suffixIcon: Icon(Icons.calendar_today),
+          return AlertDialog(
+            title: const Text("Edit Patient Info"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: "Name"),
+                  onChanged: (_) => markDirty(),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: genderCtrl,
+                  decoration: const InputDecoration(labelText: "Gender"),
+                  onChanged: (_) => markDirty(),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: birthdayCtrl,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: "Birthday",
+                    suffixIcon: Icon(Icons.calendar_today),
+                  ),
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: dialogContext,
+                      initialDate: DateTime.tryParse(birthdayCtrl.text) ??
+                          DateTime(2000),
+                      firstDate: DateTime(1900),
+                      lastDate: DateTime.now(),
+                    );
+                    if (picked != null) {
+                      setStateDialog(() {
+                        birthdayCtrl.text =
+                            DateFormat('yyyy-MM-dd').format(picked);
+                        dirty = true;
+                      });
+                    }
+                  },
+                ),
+              ],
             ),
-            onTap: () async {
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: DateTime.tryParse(birthdayCtrl.text) ?? DateTime(2000),
-                firstDate: DateTime(1900),
-                lastDate: DateTime.now(),
-              );
-              if (picked != null) {
-                birthdayCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
-                dirty = true; // mark dirty
-              }
-            },
-          ),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Theme.of(context).colorScheme.onPrimary,
-            ),
-            onPressed: dirty
-                ? () async {
-final patientId = _localReport['patient_id'] as int?;
-if (patientId != null) {
-  final age = ageFromBirthday(birthdayCtrl.text.trim());
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor:
+                      Theme.of(context).colorScheme.onPrimary,
+                ),
+                onPressed: !dirty
+                    ? null
+                    : () async {
+                        final patientId =
+                            _localReport['patient_id'] as int?;
+                        if (patientId == null) {
+                          Navigator.of(dialogContext).pop();
+                          return;
+                        }
 
-  // 1) Update DB
-  await db.database.then((conn) {
-    conn.update(
-      'patients',
-      {
-        'name': nameCtrl.text.trim(),
-        'gender': genderCtrl.text.trim(),
-        'birthday': birthdayCtrl.text.trim(),
-        'age': age,
-      },
-      where: 'patient_id = ?',
-      whereArgs: [patientId],
-    );
-  });
+                        final age =
+                            ageFromBirthday(birthdayCtrl.text.trim());
 
-  final prefs = await SharedPreferences.getInstance();
-  final practitionerId = prefs.getInt('practitioner_id');
+                        // 1) Update DB
+                        await db.database.then((conn) {
+                          conn.update(
+                            'patients',
+                            {
+                              'name': nameCtrl.text.trim(),
+                              'gender': genderCtrl.text.trim(),
+                              'birthday': birthdayCtrl.text.trim(),
+                              'age': age,
+                            },
+                            where: 'patient_id = ?',
+                            whereArgs: [patientId],
+                          );
+                        });
 
-  if (practitionerId == null) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Practitioner not found — please log in again.")),
-    );
-    return;
-  }
+                        final prefs =
+                            await SharedPreferences.getInstance();
+                        final practitionerId =
+                            prefs.getInt('practitioner_id');
 
-  // 2) Save JSON
-  final folderPath = _localReport['folder_path'];
-  if (folderPath != null && folderPath.toString().isNotEmpty) {
-    await storage.savePatientInfoJson({
-      'patient_id': patientId,
-      'practitioner_id': practitionerId,
-      'name': nameCtrl.text.trim(),
-      'birthday': birthdayCtrl.text.trim(),
-      'age': age,
-      'gender': genderCtrl.text.trim(),
-      'folder_path': folderPath,
-      'symptoms': _localReport['symptoms'] ?? '',
-    });
-  }
+                        if (practitionerId == null) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                "Practitioner not found — please log in again.",
+                              ),
+                            ),
+                          );
+                          Navigator.of(dialogContext).pop();
+                          return;
+                        }
 
-  // 3) Refresh state
-  if (!context.mounted) return;
-  setState(() {
-    _localReport['name'] = nameCtrl.text.trim();
-    _localReport['gender'] = genderCtrl.text.trim();
-    _localReport['birthday'] = birthdayCtrl.text.trim();
-    _localReport['age'] = age; // ✅ NEW
-  });
+                        // 2) Save JSON (internal only)
+                        final folderPath =
+                            _localReport['folder_path'];
+                        if (folderPath != null &&
+                            folderPath.toString().isNotEmpty) {
+                          await storage.savePatientInfoJson({
+                            'patient_id': patientId,
+                            'practitioner_id': practitionerId,
+                            'name': nameCtrl.text.trim(),
+                            'birthday': birthdayCtrl.text.trim(),
+                            'age': age,
+                            'gender': genderCtrl.text.trim(),
+                            'folder_path': folderPath,
+                            'symptoms':
+                                _localReport['symptoms'] ?? '',
+                          });
+                        }
 
-  if (context.mounted) Navigator.pop(context);
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text("Patient info updated.")),
+                        // 3) Update local state on page
+                        if (!mounted) return;
+                        setState(() {
+                          _localReport['name'] =
+                              nameCtrl.text.trim();
+                          _localReport['gender'] =
+                              genderCtrl.text.trim();
+                          _localReport['birthday'] =
+                              birthdayCtrl.text.trim();
+                          _localReport['age'] = age;
+                        });
+
+                        if (!context.mounted) return; {
+                          Navigator.of(dialogContext).pop();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content:
+                                  Text("Patient info updated."),
+                            ),
+                          );
+                        }
+                      },
+                child: const Text("Save"),
+              ),
+            ],
+          );
+        },
+      );
+    },
   );
 }
-            dirty = false;
-            }
-            : null,
-            child: const Text("Save"),
-          ),
-        ],
-      ),
-    );
-  }
 
   // -------- Export PDF --------
 
