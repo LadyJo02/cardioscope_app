@@ -135,15 +135,33 @@ if (!await practitionerBackupDir.exists()) {
   return; // No folder → no backup
 }
 
-// 2️⃣ Ensure folder contains real data
-final dataFiles = practitionerBackupDir
-    .listSync(recursive: true)
-    .where((f) => f is File && (f.path.endsWith(".wav") || f.path.endsWith(".json")))
-    .toList();
+// 2️⃣ Strict check: look ONLY inside /patients/.../recordings for real data
+bool hasRealData = false;
 
-if (dataFiles.isEmpty) {
-  return; // Folder exists but EMPTY → do NOT show restore dialog
+final patientsRoot = Directory("${practitionerBackupDir.path}/patients");
+if (await patientsRoot.exists()) {
+  final patientDirs = patientsRoot.listSync().whereType<Directory>();
+  for (final pDir in patientDirs) {
+    final recDir = Directory("${pDir.path}/recordings");
+    if (await recDir.exists()) {
+      final wavs = recDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.toLowerCase().endsWith(".wav"))
+          .toList();
+
+      if (wavs.isNotEmpty) {
+        hasRealData = true;
+        break;
+      }
+    }
+  }
 }
+
+if (!hasRealData) {
+  return; // No patient WAV files → no restore prompt
+}
+
 
     final conn = await db.database;
     int count = 0;
