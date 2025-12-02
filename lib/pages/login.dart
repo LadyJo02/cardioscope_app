@@ -123,15 +123,27 @@ class _LoginPageState extends State<LoginPage> {
 
     if (!await backupDir.exists()) return;
 
-    final entries = backupDir.listSync().whereType<Directory>().toList();
-    if (entries.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("No previous backup found.")),
-        );
-      }
-      return;
-    }
+// Ensure backup belongs to this practitioner only
+final emailHash = storage.emailHash8(practitionerEmail);
+
+final practitionerFolderName = "U${practitionerId.toString().padLeft(6, '0')}_$emailHash";
+final practitionerBackupDir = Directory("${backupDir.path}/$practitionerFolderName");
+
+
+// 1️⃣ Ensure folder exists first
+if (!await practitionerBackupDir.exists()) {
+  return; // No folder → no backup
+}
+
+// 2️⃣ Ensure folder contains real data
+final dataFiles = practitionerBackupDir
+    .listSync(recursive: true)
+    .where((f) => f is File && (f.path.endsWith(".wav") || f.path.endsWith(".json")))
+    .toList();
+
+if (dataFiles.isEmpty) {
+  return; // Folder exists but EMPTY → do NOT show restore dialog
+}
 
     final conn = await db.database;
     int count = 0;
@@ -156,7 +168,7 @@ class _LoginPageState extends State<LoginPage> {
         ),
         content: const Text(
           "A prior CardioScope record archive is present on this device.\n\n"
-          "\n\nWould you like to restore your patient cases and recordings?"
+          "Would you like to restore your patient cases and recordings?"
         ),
         actions: [
           TextButton(
@@ -214,11 +226,8 @@ if (alreadyAuthed) {
 if (pinCheck == null || pinCheck.length != 6) {
   if (mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("❌ PIN verification failed.")),
+      const SnackBar(content: Text("PIN verification failed.")),
     );
-    // Surface a clear auth error so the user can try again normally
-    _loginError = "Invalid email or PIN.";
-    setState(() {});
   }
   return;
 }
@@ -526,7 +535,7 @@ Future<bool> _offerRestoreFlowIfBackupPresent({
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) {
-                  if (_debouncedTap() && !_isLoggingIn) _login();
+                  if (_debouncedTap() && !_isRegistering) _register();
                 },
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
@@ -833,6 +842,9 @@ Future<bool> _offerRestoreFlowIfBackupPresent({
               onSubmitted: (_) {
                 if (_debouncedTap() && !_isLoggingIn) _login();
               },
+              onChanged: (value) {
+                _loginEmailCtl.text = value; // ✅ keep our backing field in sync
+              },
             );
           },
           itemBuilder: (context, suggestion) => ListTile(title: Text(suggestion)),
@@ -920,7 +932,7 @@ Future<bool> _offerRestoreFlowIfBackupPresent({
           keyboardType: TextInputType.number,
           textInputAction: TextInputAction.done,
           onSubmitted: (_) {
-            if (_debouncedTap() && !_isLoggingIn) _login();
+            if (_debouncedTap() && !_isRegistering) _register();
           },
           inputFormatters: [
             FilteringTextInputFormatter.digitsOnly,
@@ -986,12 +998,41 @@ DropdownButtonFormField<String>(
           ),
         ),
 
-        CheckboxListTile(
-          title: const Text("I have read and agree to the Terms & Conditions"),
-          value: _acceptedTerms,
-          onChanged: (v) => setState(() => _acceptedTerms = v ?? false),
-          controlAffinity: ListTileControlAffinity.leading,
+Row(
+  crossAxisAlignment: CrossAxisAlignment.start,
+  children: [
+    Checkbox(
+      value: _acceptedTerms,
+      onChanged: (v) => setState(() => _acceptedTerms = v ?? false),
+    ),
+    const Expanded(
+      child: Text.rich(
+        TextSpan(
+          text: "By signing up, you agree to our ",
+          children: [
+            TextSpan(
+              text: "Terms & Conditions",
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            TextSpan(text: " and "),
+            TextSpan(
+              text: "Privacy Policy",
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            TextSpan(text: "."),
+          ],
         ),
+        style: TextStyle(fontSize: 13.5, height: 1.4),
+      ),
+    ),
+  ],
+),
 
         if (_registerError != null) ...[
           const SizedBox(height: 8),

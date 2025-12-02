@@ -51,9 +51,31 @@ class _RecordPageState extends State<RecordPage> {
   bool _isProcessing = false;
   bool _isUsbMicConnected = false;
 
+// ----------------------------------------------------
+// Dual-threshold noise detection
+// ----------------------------------------------------
+
+// 1) ZCR threshold for *subtle allowed noise*
+// This allows device hiss, slight static, soft background air
+final double _softNoiseZcr = 0.38;
+
+// 2) Higher ZCR threshold for "LOUD NOISE" (talking, coughing, friction)
+final double _hardNoiseZcr = 0.55;
+
+// Placement threshold (unchanged)
+final double _minSignalRms = 0.015;
+
+// State for UI signal indicator
+String _signalStatus = "Ready";
+Color _signalColor = Colors.grey;
+
   List<FlSpot> _spots = [];
   double _timeCounter = 0;
   double _displayGain = 1.0;
+
+  /// 🔍 current ZCR for the noise meter
+  double _currentZcr = 0.0;
+
   Timer? _timer;
   Timer? _recordingTimer;
   Duration _duration = Duration.zero;
@@ -192,8 +214,7 @@ class _RecordPageState extends State<RecordPage> {
       return;
     }
 
-    // ✅ If already recording → user is trying to stop early
-// ✅ If already recording → user is trying to stop early
+// If already recording → user is trying to stop early
 if (_isRecording) {
   // Pause timers + data first
   _stopTimer();
@@ -302,7 +323,94 @@ try {
     );
   }
 
+Future<bool> _preRecordCheck() async {
+  final tmpController = StreamController<Uint8List>();
+
+  double rms = 0;
+  double zcr = 0;
+  int samples = 0;
+
+  // 1-second quick capture
+  await _dataStreamer.startRecorder(
+    toStream: tmpController.sink,
+    codec: Codec.pcm16,
+    numChannels: 1,
+    sampleRate: 4000,
+  );
+
+  tmpController.stream.listen((raw) {
+    final bd = raw.buffer.asByteData();
+
+    for (int i = 0; i < raw.length; i += 2) {
+      final s = bd.getInt16(i, Endian.little) / 32768.0;
+      rms += s * s;
+      samples++;
+
+      if (i > 2) {
+        final prev = bd.getInt16(i - 2, Endian.little) / 32768.0;
+        if ((s >= 0 && prev < 0) || (s < 0 && prev >= 0)) zcr++;
+      }
+    }
+  });
+
+  await Future.delayed(const Duration(seconds: 1));
+
+  await _dataStreamer.stopRecorder();
+  await tmpController.close();
+
+  if (samples == 0) return false;
+
+  rms = math.sqrt(rms / samples);
+  zcr = zcr / samples;
+
+  if (rms < _minSignalRms) {
+    await _showQualityDialog(
+      "Weak Chestpiece Placement",
+      "Signal is too weak. Please reposition the chestpiece.",
+    );
+    return false;
+  }
+
+if (zcr > _hardNoiseZcr) {
+    await _showQualityDialog(
+      "Noise Detected",
+      "Talking or environmental noise detected.",
+    );
+    return false;
+}
+
+  return true;
+}
+
+Future<void> _showQualityDialog(String title, String msg) {
+  return showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: Text(title),
+      content: Text(msg),
+      actions: [
+        TextButton(
+          child: const Text("OK"),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ],
+    ),
+  );
+}
+
+
   Future<void> _startRecording() async {
+// --------------------------------------------------
+// 🩺 PRE-RECORD QUALITY CHECK (1 second)
+// --------------------------------------------------
+bool ok = await _preRecordCheck();
+if (!mounted) return;
+
+if (!ok) {
+  setState(() => _isProcessing = false);
+  return;
+}
+
     _recordingDataController = StreamController<Uint8List>();
     _dataSubscription = _recordingDataController!.stream.listen(_updateWaveform);
 
@@ -517,9 +625,20 @@ try {
     _toast("Switched patient", success: true);
   }
 
+double _estimateHighFreqEnergy(List<double> signal) {
+  double energy = 0;
+  for (int i = 1; i < signal.length; i++) {
+    double diff = (signal[i] - signal[i - 1]).abs();
+    energy += diff;
+  }
+  return energy / signal.length;
+}
+
+
   void _updateWaveform(Uint8List rawData) {
     final bd = rawData.buffer.asByteData();
     final tmp = <double>[];
+  
 
     for (int i = 0; i < rawData.lengthInBytes; i += 2) {
       tmp.add(bd.getInt16(i, Endian.little) / 32768.0);
@@ -538,9 +657,59 @@ try {
     }
 
     final peak = reduced.fold(1e-6, (m, e) => math.max(m, e.abs()));
-    double targetGain = 1 / (peak * 1.2);
+    double targetGain = (peak <= 1e-6) ? 1.0 : 1 / (peak * 1.2);
     targetGain = targetGain.clamp(0.8, 6.0);
     _displayGain = 0.9 * _displayGain + 0.1 * targetGain;
+
+// -------------------------------------------------------
+// 🩺 REAL-TIME SIGNAL QUALITY CHECK
+// -------------------------------------------------------
+double rms = 0;
+int zeroCross = 0;
+
+for (int i = 1; i < tmp.length; i++) {
+  rms += tmp[i] * tmp[i];
+
+  if ((tmp[i] >= 0 && tmp[i - 1] < 0) || (tmp[i] < 0 && tmp[i - 1] >= 0)) {
+    zeroCross++;
+  }
+}
+
+rms = math.sqrt(rms / tmp.length);
+double zcr = zeroCross / tmp.length;
+
+// store for UI bar
+_currentZcr = zcr;
+
+final highFreqEnergy = _estimateHighFreqEnergy(tmp);
+
+// HighFreqEnergy > threshold → likely human voice or friction
+const highFreqThreshold = 0.15;
+
+
+// -------------------------------------------------------
+// Dual-threshold noise classification
+// -------------------------------------------------------
+if (rms < _minSignalRms) {
+  _signalStatus = "Weak";
+  _signalColor = AppColors.warning;
+
+} else if (highFreqEnergy > highFreqThreshold) {
+  _signalStatus = "Voice/Movement Noise";
+  _signalColor = AppColors.warning;
+
+} else if (zcr > _hardNoiseZcr) {
+  _signalStatus = "Loud Noise";
+  _signalColor = AppColors.warning;
+
+} else if (zcr > _softNoiseZcr) {
+  _signalStatus = "Mild Noise";
+  _signalColor = Colors.orange;
+
+} else {
+  _signalStatus = "Good";
+  _signalColor = AppColors.success;
+}
 
     setState(() {
       for (final s in reduced) {
@@ -552,6 +721,8 @@ try {
       }
     });
   }
+
+
 
   void _startTimer() {
     _timer = Timer.periodic(
@@ -816,6 +987,30 @@ Padding(
               ),
             ),
 
+// --------------------------------------
+// 🔍 Small signal quality indicator
+// --------------------------------------
+if (_isRecording)
+  Padding(
+    padding: const EdgeInsets.only(top: 6, bottom: 12),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.circle, size: 12, color: _signalColor),
+        const SizedBox(width: 6),
+        Text(
+          "Signal Quality: $_signalStatus",
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: _signalColor,
+          ),
+        ),
+      ],
+    ),
+  ),
+
+
             SizedBox(height: MediaQuery.of(context).size.height * 0.04),
 
           ],
@@ -917,6 +1112,7 @@ Widget _buildGuidelinesView() {
     final maxX =
         _spots.isNotEmpty ? _spots.last.x : _visiblePoints.toDouble();
 
+
     return Column(
       children: [
         Expanded(
@@ -970,6 +1166,22 @@ Widget _buildGuidelinesView() {
         ),
         SizedBox(height: MediaQuery.of(context).size.height * 0.02),
 
+        // 🔍 Noise bar: based on _currentZcr
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          child: LinearProgressIndicator(
+            value: (_currentZcr.clamp(0.0, 1.0)),
+            backgroundColor: Colors.grey.withValues(alpha: 0.2),
+            valueColor: AlwaysStoppedAnimation(
+              _currentZcr > _hardNoiseZcr
+                  ? AppColors.warning
+                  : _currentZcr > _softNoiseZcr
+                      ? Colors.orange
+                      : AppColors.success,
+            ),
+          ),
+        ),
+
         Text(
           _formatDuration(_duration),
           style: const TextStyle(
@@ -999,7 +1211,7 @@ Widget _buildGuidelinesView() {
     final symptoms = _currentPatient?['symptoms'] ?? "";
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12),
+      margin: const EdgeInsets.symmetric(horizontal: 24),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
