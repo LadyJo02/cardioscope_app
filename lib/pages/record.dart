@@ -216,6 +216,18 @@ if (_isRecording) {
     await _fileRecorder.resume();
     _startTimer();
 
+  // 🧩 FIX: Restart the 5-second auto-stop timer
+  _recordingTimer = Timer(
+    const Duration(seconds: _recordingDurationInSeconds),
+    () async {
+      if (_isRecording) {
+        HapticFeedback.mediumImpact();
+        await _stopRecording();
+      }
+    },
+  );
+
+
     setState(() => _isProcessing = false);
     return;
   }
@@ -661,10 +673,82 @@ bd.setUint32(40, fiveSecBytes.length, Endian.little);      // data chunk size
   Widget build(BuildContext context) {
   return Scaffold( // ← return Scaffold, not just body:
     appBar: AppBar(
-      backgroundColor: AppColors.primary,
-      foregroundColor: Colors.white,
-      title: const Text("Record Heart Sound"),
+  backgroundColor: AppColors.primary,
+  foregroundColor: Colors.white,
+  title: const Text("Record Heart Sound"),
+actions: [
+Padding(
+  padding: const EdgeInsets.only(right: 14),
+  child: AnimatedContainer(
+    duration: const Duration(milliseconds: 400),
+    curve: Curves.easeInOut,
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+    decoration: BoxDecoration(
+      color: _isUsbMicConnected
+          ? (Theme.of(context).brightness == Brightness.dark
+              ? AppColors.success.withValues(alpha: 0.25)
+              : AppColors.success.withValues(alpha: 0.9))
+          : (Theme.of(context).brightness == Brightness.dark
+              ? AppColors.warning.withValues(alpha: 0.25)
+              : AppColors.warning.withValues(alpha: 0.9)),
+      borderRadius: BorderRadius.circular(30),
+      border: Border.all(
+        color: Colors.white.withValues(alpha: 
+          Theme.of(context).brightness == Brightness.dark ? 0.2 : 0.6,
+        ),
+        width: 1.2,
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: _isUsbMicConnected
+              ? AppColors.success.withValues(alpha: 0.4)
+              : AppColors.warning.withValues(alpha: 0.4),
+          blurRadius: 8,
+          offset: const Offset(0, 3),
+        ),
+      ],
     ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          _isUsbMicConnected ? Icons.usb_rounded : Icons.usb_off_rounded,
+          color: Theme.of(context).brightness == Brightness.dark
+              ? Colors.white
+              : Colors.white,
+          size: 18,
+        ),
+        const SizedBox(width: 8),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          transitionBuilder: (child, anim) =>
+              FadeTransition(opacity: anim, child: child),
+          child: Text(
+            _isUsbMicConnected ? "Connected" : "Disconnected",
+            key: ValueKey(_isUsbMicConnected),
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+              letterSpacing: 0.3,
+              shadows: [
+                Shadow(
+                  color: Colors.black.withValues(alpha:
+                    Theme.of(context).brightness == Brightness.dark ? 0.9 : 0.3,
+                  ),
+                  blurRadius: 4,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  ),
+),
+],
+),
+
     
   body: SafeArea(
     child: SingleChildScrollView(
@@ -674,17 +758,15 @@ bd.setUint32(40, fiveSecBytes.length, Endian.little);      // data chunk size
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildReceiverStatusBanner(),
-            const SizedBox(height: 8),
             _buildPatientInfoCard(),
             const SizedBox(height: 8),
 
             // ✅ Dynamic area (either waveform or guidelines)
             _isRecording
-                ? SizedBox(height: 400, child: _buildRecordingView())
+                ? SizedBox(height: MediaQuery.of(context).size.height * 0.45, child: _buildRecordingView())
                 : _buildGuidelinesView(),
 
-            const SizedBox(height: 32),
+            SizedBox(height: MediaQuery.of(context).size.height * 0.02),
 
             // ✅ Mic Button
             Hero(
@@ -724,7 +806,7 @@ bd.setUint32(40, fiveSecBytes.length, Endian.little);      // data chunk size
               ),
             ),
 
-            const SizedBox(height: 10),
+            SizedBox(height: MediaQuery.of(context).size.height * 0.012),
 
             Text(
               _isRecording ? "Recording... (5s)" : "Tap to record",
@@ -734,7 +816,8 @@ bd.setUint32(40, fiveSecBytes.length, Endian.little);      // data chunk size
               ),
             ),
 
-            const SizedBox(height: 30), // ✅ Extra bottom space to prevent overlap
+            SizedBox(height: MediaQuery.of(context).size.height * 0.04),
+
           ],
         ),
       ),
@@ -743,39 +826,6 @@ bd.setUint32(40, fiveSecBytes.length, Endian.little);      // data chunk size
 );
   }
 
-  Widget _buildReceiverStatusBanner() {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(horizontal: 12),
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-      decoration: BoxDecoration(
-        color: _isUsbMicConnected
-            ? AppColors.success.withValues(alpha: 0.15)
-            : AppColors.warning.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            _isUsbMicConnected ? Icons.usb_rounded : Icons.usb_off_rounded,
-            color: _isUsbMicConnected ? AppColors.success : AppColors.warning,
-            size: 18,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            _isUsbMicConnected
-                ? "Receiver Connected"
-                : "Receiver Disconnected",
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              color: _isUsbMicConnected ? AppColors.success : AppColors.warning,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
 Widget _buildGuidelinesView() {
   return Padding(
@@ -803,7 +853,7 @@ Widget _buildGuidelinesView() {
 ),
 
 
-        const SizedBox(height: 14),
+        SizedBox(height: MediaQuery.of(context).size.height * 0.018),
 
         // Diagram
         Center(
@@ -814,7 +864,7 @@ Widget _buildGuidelinesView() {
           ),
         ),
 
-        const SizedBox(height: 14),
+        SizedBox(height: MediaQuery.of(context).size.height * 0.018),
 
         // Guideline bullets
         _buildGuidelineItem(Icons.mic_off_rounded, "Quiet environment"),
@@ -822,7 +872,7 @@ Widget _buildGuidelinesView() {
         _buildGuidelineItem(Icons.timer_rounded, "Record for 5 seconds"),
         _buildGuidelineItem(Icons.person_rounded, "Patient remains still"),
 
-        const SizedBox(height: 10),
+        SizedBox(height: MediaQuery.of(context).size.height * 0.012),
 
         // Clinical notes box (aligned left, simple and readable)
         Container(
@@ -918,7 +968,8 @@ Widget _buildGuidelinesView() {
                   ),
           ),
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: MediaQuery.of(context).size.height * 0.02),
+
         Text(
           _formatDuration(_duration),
           style: const TextStyle(

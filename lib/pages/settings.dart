@@ -438,31 +438,73 @@ Future<void> _rescanStorage() async {
     );
   }
 
-  void _showDialog({
-    required String title,
-    required String content,
-    required String confirm,
-    required VoidCallback onConfirm,
-  }) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(title),
-        content: Text(content),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: AppColors.primary),
-            onPressed: () {
-              Navigator.pop(context);
-              onConfirm();
-            },
-            child: Text(confirm),
-          )
-        ],
+void _showDialog({
+  required String title,
+  required String content,
+  required String confirm,
+  required VoidCallback onConfirm,
+}) {
+  final theme = Theme.of(context);
+  final isDark = theme.brightness == Brightness.dark;
+
+  showDialog(
+    context: context,
+    builder: (_) => AlertDialog(
+      backgroundColor: theme.cardColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
       ),
-    );
-  }
+      title: Text(
+        title,
+        style: theme.textTheme.titleMedium?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: theme.colorScheme.onSurface,
+        ),
+      ),
+      content: Text(
+        content,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.85),
+        ),
+      ),
+      actionsPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      actionsAlignment: MainAxisAlignment.end,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            "Cancel",
+            style: TextStyle(
+              color: isDark
+                  ? Colors.white70
+                  : AppColors.primary.withValues(alpha: 0.8),
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          ),
+          onPressed: () {
+            Navigator.pop(context);
+            onConfirm();
+          },
+          child: Text(
+            confirm,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   // ================= Language Dialog =================
 
