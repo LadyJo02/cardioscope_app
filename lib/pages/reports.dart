@@ -1,17 +1,944 @@
-import 'package:flutter/material.dart';
+//lib\pages\reports.dart
+import 'dart:io';
 
-class ReportsPage extends StatelessWidget {
+import 'package:cardioscope_app/services/storage_service.dart';
+import 'package:cardioscope_app/utils/app_colors.dart';
+import 'package:cardioscope_app/utils/ui_helpers.dart';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../database_helper.dart';
+import '../utils/excel_exporter.dart';
+import '../utils/pdf_exporter.dart';
+import 'reports_detail.dart';
+
+final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
+
+class ReportsPage extends StatefulWidget {
   const ReportsPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Reports"),
+  State<ReportsPage> createState() => ReportsPageState();
+}
+
+class ReportsPageState extends State<ReportsPage>
+    with AutomaticKeepAliveClientMixin, RouteAware {
+  @override
+  bool get wantKeepAlive => true;
+
+  final db = DatabaseHelper.instance;
+  List<Map<String, dynamic>> _reports = [];
+  List<Map<String, dynamic>> _patients = [];
+  List<Map<String, dynamic>> _filteredReports = [];
+
+  String _practitionerName = "";
+  int? _practitionerId;
+  bool _isLoading = true;
+  String? _selectedPatient = 'All';
+  String _searchQuery = "";
+
+  // Multi-select mode
+bool _selectionMode = false;
+Set<int> _selectedRecordIds = {};
+
+
+  // For undo delete buffer
+  Map<String, dynamic>? _recentlyDeleted;
+
+  
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      routeObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void dispose() {
+    routeObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    debugPrint("📥 Returned to Reports tab — refreshing...");
+    load();
+    debugPrint("📲 Reports refreshed");
+  }
+
+  Future<void> load() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+    debugPrint("🔄 Loading reports data...");
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _practitionerId = prefs.getInt('practitioner_id');
+      _practitionerName =
+          prefs.getString('practitioner_name') ?? "Practitioner";
+
+      if (_practitionerId == null) {
+        if (mounted) setState(() => _isLoading = false);
+        debugPrint("⚠️ No practitioner ID found. Aborting load.");
+        return;
+      }
+
+      debugPrint("🔍 Fetching reports for practitioner ID: $_practitionerId");
+      final dbData = await db.getAllReportsWithPatients(_practitionerId!);
+      debugPrint("✅ Fetched ${dbData.length} reports.");
+
+      debugPrint("🔍 Fetching all patients...");
+      final patients = await db.getAllPatients(_practitionerId!);
+      debugPrint("✅ Fetched ${patients.length} patients.");
+
+      final data = List<Map<String, dynamic>>.from(dbData);
+
+      // Sort newest first
+      data.sort((a, b) {
+        final da = DateTime.tryParse(a['record_date'] ?? '') ?? DateTime(2000);
+        final dbb = DateTime.tryParse(b['record_date'] ?? '') ?? DateTime(2000);
+        return dbb.compareTo(da);
+      });
+
+      if (mounted) {
+        setState(() {
+          _reports = data;
+          _patients = patients;
+          _filteredReports = data;
+          _isLoading = false;
+        });
+        debugPrint("🟢 UI updated successfully.");
+      }
+    } catch (e) {
+      debugPrint("🔴 ERROR loading reports: $e");
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Error loading reports: $e")));
+      }
+    }
+  }
+
+  void _applyFilters() {
+    setState(() {
+      _filteredReports = _reports.where((r) {
+        final name = (r['name'] ?? '').toString().toLowerCase();
+
+        final matchesSearch =
+            _searchQuery.isEmpty || name.contains(_searchQuery.toLowerCase());
+
+        // Simpler and safer: match directly to the dropdown value
+        final matchesPatient = _selectedPatient == null ||
+            _selectedPatient == 'All' ||
+            r['name'] == _selectedPatient;
+
+        return matchesSearch && matchesPatient;
+      }).toList();
+    });
+  }
+
+  Future<void> _handleExport(
+    Future<void> Function(List<Map<String, dynamic>>, DateTimeRange)
+        exportFunction,
+  ) async {
+    if (!mounted) return;
+    final scaffold = ScaffoldMessenger.of(context);
+final picked = await showDateRangePicker(
+  context: context,
+  firstDate: DateTime(2020),
+  lastDate: DateTime.now().add(const Duration(days: 1)),
+  initialDateRange: DateTimeRange(
+    start: DateTime.now().subtract(const Duration(days: 30)),
+    end: DateTime.now(),
+  ),
+  builder: (context, child) {
+    return Theme(
+      data: Theme.of(context).copyWith(
+        colorScheme: ColorScheme.light(
+          primary: AppColors.primary,          // header, selected date
+          onPrimary: Colors.white,              // text on header
+          surfaceTint: AppColors.primaryLight,  // subtle accent
+          onSurface: Theme.of(context).colorScheme.onSurface,            // default text color
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: AppColors.primary, // cancel/confirm button color
+          ),
+        ),
       ),
-      body: const Center(
-        child: Text("Reports Page"),
+      child: child!,
+    );
+  },
+);
+    if (!context.mounted || picked == null || _practitionerId == null) return;
+
+    final filtered = await db.getAllReports(
+      _practitionerId!,
+      startDate: picked.start,
+      endDate: picked.end,
+    );
+
+    if (!context.mounted) return;
+
+    if (filtered.isEmpty) {
+      scaffold.showSnackBar(
+        const SnackBar(content: Text("No reports in this date range.")),
+      );
+      return;
+    }
+    await exportFunction(filtered, picked);
+  }
+
+  Future<void> _exportWavFiles(
+      List<Map<String, dynamic>> filtered, DateTimeRange range) async {
+    if (!mounted) return;
+    final scaffold = ScaffoldMessenger.of(context);
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final files = <XFile>[];
+      for (final r in filtered) {
+        final path = r['file_path'] as String?;
+        if (path != null && await File(path).exists()) files.add(XFile(path));
+      }
+      if (mounted) Navigator.pop(context);
+      if (files.isEmpty) {
+        scaffold.showSnackBar(
+          const SnackBar(content: Text("No WAV files found.")),
+        );
+        return;
+      }
+      await Share.shareXFiles(
+        files,
+        text:
+            'CardioScope WAV files ${DateFormat('yyyy-MM-dd').format(range.start)}–${DateFormat('yyyy-MM-dd').format(range.end)}',
+      );
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      scaffold.showSnackBar(SnackBar(content: Text("Export error: $e")));
+    }
+  }
+
+  Future<void> _showEditDialogForList(Map<String, dynamic> report) async {
+    final nameCtrl = TextEditingController(text: report['name'] ?? '');
+    final genderCtrl = TextEditingController(text: report['gender'] ?? '');
+    final birthdayCtrl = TextEditingController(text: report['birthday'] ?? '');
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Edit Patient Info"),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: "Name")),
+            const SizedBox(height: 8),
+            TextField(
+                controller: genderCtrl,
+                decoration: const InputDecoration(labelText: "Gender")),
+            const SizedBox(height: 8),
+            TextField(
+              controller: birthdayCtrl,
+              readOnly: true,
+              decoration: const InputDecoration(
+                labelText: "Birthday",
+                suffixIcon: Icon(Icons.calendar_today),
+              ),
+              onTap: () async {
+                DateTime? picked = await showDatePicker(
+                  context: context,
+                  initialDate:
+                      DateTime.tryParse(birthdayCtrl.text) ?? DateTime(2000),
+                  firstDate: DateTime(1900),
+                  lastDate: DateTime.now(),
+                );
+                if (picked != null) {
+                  birthdayCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
+                }
+              },
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            ),
+            child: const Text("Save"),
+            onPressed: () async {
+              final patientId = report['patient_id'] as int?;
+              if (patientId != null) {
+                await db.database.then((conn) {
+                  conn.update(
+                    'patients',
+                    {
+                      'name': nameCtrl.text.trim(),
+                      'gender': genderCtrl.text.trim(),
+                      'birthday': birthdayCtrl.text.trim(),
+                    },
+                    where: 'patient_id = ?',
+                    whereArgs: [patientId],
+                  );
+                });
+                // Auto-save patient_info.json
+                final storage = StorageService();
+                await storage.savePatientInfoJson({
+                  'patient_id': patientId,
+                  'practitioner_id': _practitionerId,
+                  'name': nameCtrl.text.trim(),
+                  'birthday': birthdayCtrl.text.trim(),
+                  'gender': genderCtrl.text.trim(),
+                  'symptoms': report['symptoms'] ?? '',
+                  'folder_path': report['folder_path'],
+                });
+
+                if (!context.mounted) return;
+
+                setState(() {
+                  final updated = Map<String, dynamic>.from(report);
+                  updated['name'] = nameCtrl.text.trim();
+                  updated['gender'] = genderCtrl.text.trim();
+                  updated['birthday'] = birthdayCtrl.text.trim();
+                  final index = _filteredReports.indexOf(report);
+                  if (index != -1) _filteredReports[index] = updated;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Patient info updated.")),
+                );
+                Navigator.pop(context);
+              }
+            },
+          ),
+        ],
       ),
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: AppColors.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+        title: _selectionMode
+            ? Text('${_selectedRecordIds.length} selected')
+            : const Text('Reports'),
+        iconTheme: IconThemeData(color: Theme.of(context).colorScheme.onPrimary),
+        actions: _selectionMode
+    ? [
+        // ✔️ Select All
+        IconButton(
+          icon: const Icon(Icons.select_all),
+          tooltip: "Select All",
+          onPressed: () {
+            setState(() {
+              _selectedRecordIds = _filteredReports
+                  .map<int>((r) => r['record_id'] as int)
+                  .toSet();
+            });
+          },
+        ),
+        // ❌ Cancel
+        IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: "Cancel",
+          onPressed: () {
+            setState(() {
+              _selectionMode = false;
+              _selectedRecordIds.clear();
+            });
+          },
+        ),
+        // 🗑 Delete selected
+        IconButton(
+          icon: const Icon(Icons.delete),
+          tooltip: "Delete Selected",
+          onPressed: _confirmDeleteSelected,
+        ),
+      ]
+    : [
+        IconButton(
+          icon: const Icon(Icons.ios_share),
+          tooltip: "Export WAV Files",
+          onPressed: () => _handleExport(_exportWavFiles),
+        ),
+        IconButton(
+          icon: const Icon(Icons.picture_as_pdf_outlined),
+          tooltip: "Export PDF",
+          onPressed: () => _handleExport((list, range) =>
+              PdfExporter.exportBatchReports(
+                  context: context,
+                  reports: list,
+                  practitionerName: _practitionerName,
+                  dateRange: range)),
+        ),
+        IconButton(
+          icon: const Icon(Icons.table_view_outlined),
+          tooltip: "Export Excel",
+          onPressed: () => _handleExport((list, range) =>
+              ExcelExporter.exportReportsToExcel(
+                  context: context,
+                  reports: list,
+                  practitionerName: _practitionerName,
+                  dateRange: range)),
+        ),
+      ],
+
+      ),
+body: _isLoading
+    ? const Center(child: CircularProgressIndicator())
+    : RefreshIndicator(
+        onRefresh: load,
+        child: Column(
+          children: [
+            // 🔍 Search + Filter
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Search patient name...',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.all(Radius.circular(12)),
+                        ),
+                      ),
+                      onChanged: (val) {
+                        _searchQuery = val;
+                        _applyFilters();
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  DropdownButton<String>(
+                    value: _selectedPatient,
+                    items: [
+                      const DropdownMenuItem(
+                          value: 'All', child: Text('All Patients')),
+                      ..._patients.map((p) => DropdownMenuItem<String>(
+                            value: p['name'],
+                            child: Text(p['name']),
+                          )),
+                    ],
+                    onChanged: (val) {
+                      setState(() {
+                        _selectedPatient = val;
+                      });
+                      _applyFilters();
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+            // 📋 Reports list
+            Expanded(
+              child: _filteredReports.isEmpty
+                  ? const Center(child: Text('No reports found.'))
+                  : ListView.builder(
+                      padding:
+                          const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      itemCount: _filteredReports.length,
+                      itemBuilder: (_, i) {
+                        final r = _filteredReports[i];
+                        final patientId = r['patient_id'] as int?;
+                        final pid = patientId != null
+                            ? db.formatPatientId(patientId)
+                            : 'N/A';
+                        String date = '';
+                        try {
+                          final raw =
+                              r['analysis_date'] ?? r['record_date'];
+                          if (raw is String && raw.isNotEmpty) {
+                            date = DateFormat('yyyy-MM-dd HH:mm')
+                                .format(DateTime.parse(raw));
+                          }
+                        } catch (_) {}
+
+                        return Dismissible(
+                          key: Key(r['record_id'].toString()),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            color: AppColors.warning,
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20),
+                            child: Icon(
+                              Icons.delete,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface,
+                            ),
+                          ),
+                          confirmDismiss: (_) async {
+                            return await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text("Confirm Delete"),
+                                    content: const Text(
+                                        "Are you sure you want to delete this report?"),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(context, false),
+                                        child: const Text("Cancel"),
+                                      ),
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor:
+                                              Theme.of(context)
+                                                  .colorScheme
+                                                  .primary,
+                                          foregroundColor:
+                                              Theme.of(context)
+                                                  .colorScheme
+                                                  .onPrimary,
+                                        ),
+                                        onPressed: () =>
+                                            Navigator.pop(context, true),
+                                        child: const Text("Delete"),
+                                      ),
+                                    ],
+                                  ),
+                                ) ??
+                                false;
+                          },
+                          onDismissed: (_) async {
+                            _recentlyDeleted = r;
+                            final recordId = r['record_id'];
+                            final filePath = r['file_path'];
+                            setState(() =>
+                                _filteredReports.removeAt(i));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: const Text("Report deleted"),
+                                action: SnackBarAction(
+                                  label: "UNDO",
+                                  onPressed: () async {
+                                    if (_recentlyDeleted != null) {
+                                      final restore =
+                                          _recentlyDeleted!;
+                                      _recentlyDeleted = null;
+                                      final recordData = {
+                                        'patient_id':
+                                            restore['patient_id'],
+                                        'file_path': filePath,
+                                        'record_date':
+                                            restore['record_date'],
+                                      };
+                                      final newRecordId =
+                                          await db.insertRecord(
+                                              recordData);
+                                      if (restore['diagnosis'] !=
+                                          null) {
+                                        await db
+                                            .upsertAnalysisByRecordId(
+                                          newRecordId,
+                                          diagnosis:
+                                              restore['diagnosis'],
+                                          probabilitiesJson:
+                                              restore['probabilities'] ??
+                                                  '{}',
+                                          analysisDateIso: restore[
+                                                  'analysis_date'] ??
+                                              DateTime.now()
+                                                  .toIso8601String(),
+                                        );
+                                      }
+                                      await load();
+                                    }
+                                  },
+                                ),
+                                duration:
+                                    const Duration(seconds: 4),
+                              ),
+                            );
+
+                            await Future.delayed(
+                                const Duration(seconds: 4));
+                            if (_recentlyDeleted != null &&
+                                _recentlyDeleted == r) {
+                              final storage = StorageService();
+                              await storage.deleteRecordFiles(
+                                  filePath);
+                              await db.deleteRecordById(recordId);
+                              _recentlyDeleted = null;
+                            }
+                          },
+                          child: InkWell(
+                            onLongPress: () {
+                              setState(() {
+                                _selectionMode = true;
+                                _selectedRecordIds
+                                    .add(r['record_id']);
+                              });
+                            },
+                            onTap: () async {
+                              if (_selectionMode) {
+                                setState(() {
+                                  final id = r['record_id'];
+                                  if (_selectedRecordIds
+                                      .contains(id)) {
+                                    _selectedRecordIds.remove(id);
+                                    if (_selectedRecordIds.isEmpty) {
+                                      _selectionMode = false;
+                                    }
+                                  } else {
+                                    _selectedRecordIds.add(id);
+                                  }
+                                });
+                                return;
+                              }
+
+                              final res = await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      ReportDetailPage(report: r),
+                                ),
+                              );
+                              if (res == true && mounted) load();
+                            },
+                            child: Card(
+  color: _selectedRecordIds.contains(r['record_id'])
+      ? AppColors.primary.withValues(alpha: 0.12)
+      : Theme.of(context).cardColor,
+  elevation: 2,
+  margin: const EdgeInsets.symmetric(vertical: 6.0),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  child: ListTile(
+    leading: _selectionMode
+        ? Checkbox(
+            value: _selectedRecordIds.contains(r['record_id']),
+            onChanged: (v) {
+              setState(() {
+                if (v == true) {
+                  _selectedRecordIds.add(r['record_id']);
+                } else {
+                  _selectedRecordIds.remove(r['record_id']);
+                  if (_selectedRecordIds.isEmpty) {
+                    _selectionMode = false;
+                  }
+                }
+              });
+            },
+          )
+        : UIHelpers.getStatusIndicator(r['diagnosis'], size: 12.0),
+    title: Text(
+      r['name'] ?? 'Unnamed',
+      style: const TextStyle(fontWeight: FontWeight.w600),
+    ),
+    subtitle: Text('ID: $pid • ${r['diagnosis'] ?? 'Pending'} • $date'),
+    trailing: !_selectionMode
+        ? PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: "Options",
+            onSelected: (value) async {
+              if (value == 'edit') {
+                await _showEditDialogForList(r);
+              } else if (value == 'delete') {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text("Confirm Delete"),
+                    content: const Text("Delete this report?"),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text("Cancel"),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              Theme.of(context).colorScheme.primary,
+                          foregroundColor:
+                              Theme.of(context).colorScheme.onPrimary,
+                        ),
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text("Delete"),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (confirm == true) {
+                  final storage = StorageService();
+                  await storage.deleteRecordFiles(r['file_path']);
+                  await db.deleteRecordById(r['record_id']);
+                  setState(() => _filteredReports.removeAt(i));
+                }
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'edit',
+                child: Row(children: [
+                  Icon(Icons.edit, color: AppColors.deep),
+                  SizedBox(width: 8),
+                  Text('Edit'),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(children: [
+                  Icon(Icons.delete, color: AppColors.warning),
+                  SizedBox(width: 8),
+                  Text('Delete'),
+                ],
+                ),
+              ),
+            ],
+          )
+        : null,
+  ),
+),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+
+  // ✅ Correct placement of bottomNavigationBar (AFTER body)
+  bottomNavigationBar: _selectionMode
+      ? BottomAppBar(
+          color: Theme.of(context)
+              .colorScheme
+              .surface
+              .withValues(alpha: Theme.of(context).brightness ==
+                      Brightness.dark
+                  ? 0.15
+                  : 0.08),
+          elevation: 6,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 16.0, vertical: 10.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${_selectedRecordIds.length} selected',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                Row(
+                  children: [
+                    // 📤 Share button
+                    IconButton(
+                      icon: const Icon(Icons.ios_share_rounded),
+                      color: AppColors.primary,
+                      tooltip: "Share selected",
+                      onPressed: () async {
+                        final selectedReports = _filteredReports
+                            .where((r) => _selectedRecordIds
+                                .contains(r['record_id']))
+                            .toList();
+
+                        if (selectedReports.isEmpty) return;
+                        
+                        showMenu(
+                          context: context,
+                          position:
+                              const RelativeRect.fromLTRB(500, 500, 0, 0),
+                          items: [
+                            const PopupMenuItem<String>(
+                              value: 'wav',
+                              child: Row(children: [
+                                Icon(Icons.graphic_eq,
+                                    color: AppColors.deep),
+                                SizedBox(width: 8),
+                                Text("Share as WAV"),
+                              ]),
+                            ),
+                            const PopupMenuItem<String>(
+                              value: 'pdf',
+                              child: Row(children: [
+                                Icon(Icons.picture_as_pdf,
+                                    color: AppColors.deep),
+                                SizedBox(width: 8),
+                                Text("Share as PDF"),
+                              ]),
+                            ),
+                            const PopupMenuItem<String>(
+                              value: 'excel',
+                              child: Row(children: [
+                                Icon(Icons.table_view,
+                                    color: AppColors.deep),
+                                SizedBox(width: 8),
+                                Text("Share as Excel"),
+                              ]),
+                            ),
+                          ],
+                        ).then((value) async {
+                          if (value == null) return;
+                          final range = DateTimeRange(
+                            start: DateTime.now()
+                                .subtract(const Duration(days: 30)),
+                            end: DateTime.now(),
+                          );
+                          if (value == 'wav') {
+                            await _exportWavFiles(
+                                selectedReports, range);
+                          } else if (value == 'pdf') {
+                            if (!context.mounted) return;
+                            await PdfExporter.exportBatchReports(
+                              context: context,
+                              reports: selectedReports,
+                              practitionerName: _practitionerName,
+                              dateRange: range,
+                            );
+                          } else if (value == 'excel') {
+                            if (!context.mounted) return;
+                            await ExcelExporter.exportReportsToExcel(
+                              context: context,
+                              reports: selectedReports,
+                              practitionerName: _practitionerName,
+                              dateRange: range,
+                            );
+                          }
+                        });
+                      },
+                    ),
+
+                    // 🗑 Delete button
+                    IconButton(
+                      icon: const Icon(Icons.delete_rounded),
+                      color: AppColors.primary,
+                      tooltip: "Delete selected",
+                      onPressed: _confirmDeleteSelected,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        )
+      : null,
+);
+  }
+
+
+Future<void> _confirmDeleteSelected() async {
+  if (_selectedRecordIds.isEmpty) return;
+
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text("Delete Selected"),
+      content: Text(
+          "Delete ${_selectedRecordIds.length} selected reports?\nThis cannot be undone."),
+      actions: [
+        TextButton(
+          child: const Text("Cancel"),
+          onPressed: () => Navigator.pop(context, false),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+          ),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text("Delete"),
+        ),
+      ],
+    ),
+  );
+
+  if (confirm != true) return;
+
+  final deletedItems = _filteredReports
+      .where((r) => _selectedRecordIds.contains(r['record_id']))
+      .toList();
+
+  final storage = StorageService();
+  for (final id in _selectedRecordIds) {
+    final r = _filteredReports.firstWhere((e) => e['record_id'] == id);
+    
+  // Delete internal/external files
+  await storage.deleteRecordFiles(r['file_path']);
+
+  // Delete from database
+  await db.deleteRecordById(id);
+
+  // Delete patient folder if it's now empty
+  final folderPath = r['folder_path'];
+  if (folderPath != null && await Directory(folderPath).exists()) {
+    final remaining = Directory(folderPath)
+        .listSync(recursive: true)
+        .whereType<File>()
+        .isNotEmpty;
+    if (!remaining) {
+      await Directory(folderPath).delete(recursive: true);
+    }
+  }
 }
+
+  setState(() {
+    _reports.removeWhere((r) => _selectedRecordIds.contains(r['record_id']));
+    _filteredReports.removeWhere((r) => _selectedRecordIds.contains(r['record_id']));
+    _selectionMode = false;
+    _selectedRecordIds.clear();
+  });
+
+  if (!mounted) return;
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text("Deleted ${deletedItems.length} reports"),
+      action: SnackBarAction(
+        label: "UNDO",
+        onPressed: () async {
+          for (final restore in deletedItems) {
+            final recordData = {
+              'patient_id': restore['patient_id'],
+              'file_path': restore['file_path'],
+              'record_date': restore['record_date'],
+            };
+            final newId = await db.insertRecord(recordData);
+            if (restore['diagnosis'] != null) {
+              await db.upsertAnalysisByRecordId(
+                newId,
+                diagnosis: restore['diagnosis'],
+                probabilitiesJson: restore['probabilities'] ?? '{}',
+                analysisDateIso: restore['analysis_date'] ??
+                    DateTime.now().toIso8601String(),
+              );
+            }
+          }
+          await load();
+        },
+      ),
+      duration: const Duration(seconds: 4),
+    ),
+  );
+  }
+}
+

@@ -12,3 +12,28 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# Flutter/Dart
+/build/
+.dart_tool/
+.packages
+pubspec.lock
+
+# Android
+/android/app/build/
+/android/.gradle/
+*.apk
+*.aab
+*.so
+*.sym
+*.zip
+
+# iOS
+/ios/Pods/
+/ios/Flutter/Flutter.framework
+/ios/Flutter/Flutter.podspec
+
+# macOS, Windows, Linux builds
+/macos/Flutter/ephemeral/
+/windows/flutter/ephemeral/
+/linux/flutter/ephemeral/
