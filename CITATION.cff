@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use CardioScope in your research, please cite this work."
+title: "CardioScope: A Deep Learning-Integrated Device for Non-Invasive Heart Disease Detection via Cardiac Sound Analysis"
+type: thesis
+authors:
+  - family-names: Felisilda
+    given-names: Genheylou Deligero
+  - family-names: Menorias
+    given-names: Nicole Suerte
+  - family-names: Olaguir
+    given-names: Kobe Marco Gamus
+  - family-names: Santos
+    given-names: Joanna Reyda D.
+year: 2025
+institution: "University of Science and Technology of Southern Philippines"
+keywords:
+  - Cardiac Auscultation
+  - Mitral Valve Disease
+  - Deep Learning
+  - Temporal Convolutional Network
+  - Spiking Neural Network
+  - Wireless Stethoscope
+  - Edge AI
+repository-code: "https://github.com/LadyJo02/cardioscope_app"
+license: "MIT"
