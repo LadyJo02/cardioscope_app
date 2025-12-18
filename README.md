@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="docs\images\A4 - BROCHURE inside.png" alt="BROCHURE inside" width="800">
+  <img src="docs\images\A4 - BROCHURE outside.png" alt="BROCHURE outside" width="800">
 </p>
 
 <p align="center">
-  <img src="docs\images\A4 - BROCHURE outside.png" alt="BROCHURE outside" width="800">
+  <img src="docs\images\A4 - BROCHURE inside.png" alt="BROCHURE inside" width="800">
 </p>
 
 # CardioScope  
