@@ -1,3 +1,11 @@
+<p align="center">
+  <img src="docs\images\A4 - BROCHURE inside.png" alt="BROCHURE inside" width="800">
+</p>
+
+<p align="center">
+  <img src="docs\images\A4 - BROCHURE outside.png" alt="BROCHURE outside" width="800">
+</p>
+
 # CardioScope  
 **A Deep Learning–Integrated Wireless Stethoscope for Non-Invasive Heart Disease Screening**
 
@@ -149,8 +157,6 @@ You may also cite the project as:
 ---
 
 ## Authors
-
-Authors are listed in **alphabetical order**:
 
 - Genheylou Deligero Felisilda  
 - Nicole Suerte Menorias  
