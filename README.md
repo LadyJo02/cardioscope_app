@@ -113,13 +113,13 @@ These files are stored using **Git Large File Storage (LFS)** and are accessible
 
 ```
 cardioscope_app/
-├── app/ # Flutter application source code
-├── docs/ # Images, demos, and presentation slides
-├── paper/ # Final research manuscript
-├── hardware/ # Device design and bill of materials
-├── ethics/ # Ethics clearance and validation documents
-├── CITATION.cff # Citation metadata
-└── README.md # Project documentation
+├── app/            # Flutter application source code
+├── docs/           # Images, demos, and presentation slides
+├── paper/          # Final research manuscript
+├── hardware/       # Device design and bill of materials
+├── ethics/         # Ethics clearance and validation documents
+├── CITATION.cff    # Citation metadata
+└── README.md       # Project documentation
 ```
 
 ---
@@ -139,7 +139,7 @@ CardioScope is intended strictly for **assistive screening and research purposes
 
 ## Citation
 
-If you use CardioScope or its components in academic work, please cite using the metadata provided in `CITATION.cff`.
+If you use CardioScope or its components in academic work, please cite using the metadata provided in [CITATION](CITATION.cff)
 
 You may also cite the project as:
 
