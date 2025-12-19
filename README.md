@@ -1,14 +1,6 @@
 <!-- ================= HERO / LANDING ================= -->
 
 <p align="center">
-  <img src="docs/images/A4 - BROCHURE inside.png" width="1000">
-</p>
-
-<p align="center">
-  <img src="docs/images/A4 - BROCHURE inside.png" width="1000">
-</p>
-
-<p align="center">
   <img src="docs/images/cardioscope_identity.png" width="900">
 </p>
 
