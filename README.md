@@ -4,8 +4,6 @@
   <img src="docs/images/cardioscope_identity.png" width="900">
 </p>
 
-<h1 align="center">CardioScope</h1>
-
 <p align="center">
   <strong>AI-Assisted Wireless Stethoscope for Non-Invasive Heart Disease Screening</strong>
 </p>
@@ -51,7 +49,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/system_architecture.png" width="900">
+  <img src="docs/images/system_architecture.png" width="800">
 </p>
 
 <p align="center">
@@ -87,7 +85,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/tcn_snn_architecture.png" width="800">
+  <img src="docs/images/tcn_snn_architecture.png" width="900">
 </p>
 
 <p align="center">
