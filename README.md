@@ -1,178 +1,173 @@
+<!-- ================= HERO / LANDING ================= -->
+
 <p align="center">
-  <img src="docs\images\A4 - BROCHURE outside.png" alt="BROCHURE outside" width="800">
+  <img src="docs/images/brochure_outside.png" width="1000">
 </p>
 
 <p align="center">
-  <img src="docs\images\A4 - BROCHURE inside.png" alt="BROCHURE inside" width="800">
+  <img src="docs/images/brochure_inside.png" width="1000">
 </p>
 
-# CardioScope  
-**A Deep Learning–Integrated Wireless Stethoscope for Non-Invasive Heart Disease Screening**
+<p align="center">
+  <img src="docs/images/cardioscope_identity.png" width="900">
+</p>
 
-![Flutter](https://img.shields.io/badge/Framework-Flutter-02569B)
-![Dart](https://img.shields.io/badge/Language-Dart-0175C2)
-![Deep Learning](https://img.shields.io/badge/AI-TCN%20%7C%20TCN--SNN-green)
-![On-Device AI](https://img.shields.io/badge/Inference-TensorFlow%20Lite-orange)
-![License](https://img.shields.io/badge/License-MIT-yellow.svg)
-
----
-
-## Overview
-
-**CardioScope** is a mobile-based assistive system designed to support **non-invasive cardiac screening** through automated analysis of heart auscultation sounds.  
-The system integrates a **custom wireless stethoscope**, a **Flutter mobile application**, and **temporal deep learning models** to analyze phonocardiogram (PCG) signals and identify patterns associated with mitral valve abnormalities.
-
-CardioScope is intended as a **clinical decision-support and screening tool**, not as a replacement for professional medical diagnosis.
-
-This project was developed as a capstone and research initiative at the **University of Science and Technology of Southern Philippines (USTP)**.
-
----
-
-## System Architecture
-
-The CardioScope system consists of three main layers:
-
-1. **Hardware Layer**  
-   - Custom-built electronic stethoscope
-   - Electret microphone with acoustic chamber
-   - 2.4 GHz wireless transmission module
-   - Battery-powered portable design
-
-2. **Mobile Application Layer**  
-   - Flutter-based cross-platform mobile app
-   - Real-time recording and playback of heart sounds
-   - Secure local storage with anonymized backups
-   - PDF and Excel report generation
-
-3. **AI Inference Layer**  
-   - Preprocessing pipeline for mel-spectrogram generation
-   - Temporal deep learning models deployed via TensorFlow Lite
-   - Low-latency on-device inference
+<h1 align="center">CardioScope</h1>
 
 <p align="center">
-  <img src="docs/images/system_architecture.png" alt="CardioScope System Architecture" width="800">
+  <strong>AI-Assisted Wireless Stethoscope for Non-Invasive Heart Disease Screening</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Framework-Flutter-02569B">
+  <img src="https://img.shields.io/badge/Language-Dart-0175C2">
+  <img src="https://img.shields.io/badge/AI-TCN%20%7C%20TCN--SNN-green">
+  <img src="https://img.shields.io/badge/Inference-TensorFlow%20Lite-orange">
+  <img src="https://img.shields.io/badge/License-MIT-yellow.svg">
 </p>
 
 ---
 
-## AI Model Architecture
+<!-- ================= PROBLEM ================= -->
 
-CardioScope employs **temporal deep learning architectures** optimized for auscultation signals:
-
-- **Temporal Convolutional Network (TCN)**
-- **Hybrid TCN–Spiking Neural Network (TCN–SNN)**
-
-The hybrid architecture leverages:
-- Dilated temporal convolutions for long-range dependency modeling
-- Parametric spiking neurons for temporal sparsity
-- Attention-based classification head
+<h2 align="center">The Problem</h2>
 
 <p align="center">
-  <img src="docs/images/model_architecture.png" alt="AI Model Architecture" width="800">
+  <img src="docs/images/global_cvd_burden.png" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/images/philippines_cvd_statistics.png" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/images/accessibility_vs_accuracy.png" width="800">
+</p>
+
+<p align="center">
+  <em>Early cardiac screening is limited by access, cost, and specialist availability.</em>
 </p>
 
 ---
 
-## Mobile Application Interface
+<!-- ================= SYSTEM ================= -->
 
-The CardioScope mobile application provides an end-to-end workflow for clinicians and health workers:
-
-- Guided recording of heart sounds
-- Real-time waveform visualization
-- Automated classification results
-- Patient record management
-- Report generation and export
+<h2 align="center">The Solution</h2>
 
 <p align="center">
-  <img src="docs/images/mobile_ui.png" alt="CardioScope Mobile Interface" width="800">
+  <img src="docs/images/system_goals.png" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/images/system_architecture.png" width="900">
+</p>
+
+<p align="center">
+  <em>CardioScope integrates hardware, mobile software, and on-device AI.</em>
 </p>
 
 ---
 
-## Demonstration
+<!-- ================= DATA ================= -->
 
-Sample demonstrations of the CardioScope system are provided below:
+<h2 align="center">Clinical Data</h2>
 
-- **Mobile Application Demo**  
-  `docs/demo/app_demo.gif`
+<p align="center">
+  <img src="docs/images/dataset_overview.png" width="800">
+</p>
 
-- **Hardware Recording Demo**  
-  `docs/demo/device_demo.gif`
+<p align="center">
+  <img src="docs/images/clinical_validation.png" width="800">
+</p>
 
-These demonstrations illustrate the recording process, AI inference flow, and report generation.
-
----
-
-## Defense and Presentation Materials
-
-The official project defense materials are available below:
-
-- **Final Defense Slides**  
-  [Final Defense Presentation (PDF)](docs/slides/Final%20Defense.pdf)
-
-- **USTP CardioScope Slides**  
-  [USTP CardioScope Presentation (PDF)](docs/slides/USTP-CardioScope.pdf)
-
-These files are stored using **Git Large File Storage (LFS)** and are accessible directly through GitHub.
+<p align="center">
+  <em>Validated phonocardiogram recordings reviewed by medical experts.</em>
+</p>
 
 ---
 
-## Repository Structure
+<!-- ================= AI ================= -->
 
-```
-cardioscope_app/
-├── app/            # Flutter application source code
-├── docs/           # Images, demos, and presentation slides
-├── paper/          # Final research manuscript
-├── hardware/       # Device design and bill of materials
-├── ethics/         # Ethics clearance and validation documents
-├── CITATION.cff    # Citation metadata
-└── README.md       # Project documentation
-```
+<h2 align="center">AI Engine</h2>
 
----
+<p align="center">
+  <img src="docs/images/model_overview.png" width="800">
+</p>
 
-## Ethics and Compliance
+<p align="center">
+  <img src="docs/images/tcn_snn_architecture.png" width="800">
+</p>
 
-This project complies with ethical research standards for health-related data:
+<p align="center">
+  <img src="docs/images/model_comparison.png" width="800">
+</p>
 
-- Patient data are anonymized
-- Audio recordings are stored locally
-- Explicit consent procedures are followed
-- Ethics clearance documents are included in the repository
-
-CardioScope is intended strictly for **assistive screening and research purposes**.
+<p align="center">
+  <em>Temporal deep learning optimized for heart sound analysis.</em>
+</p>
 
 ---
 
-## Citation
+<!-- ================= PIPELINE ================= -->
 
-If you use CardioScope or its components in academic work, please cite using the metadata provided in [CITATION](CITATION.cff)
+<h2 align="center">Workflow</h2>
 
-You may also cite the project as:
-
-> CardioScope: A Deep Learning–Integrated Device for Non-Invasive Heart Disease Detection via Cardiac Sound Analysis.  
-> University of Science and Technology of Southern Philippines, 2025.
-
----
-
-## Authors
-
-- Genheylou Deligero Felisilda  
-- Nicole Suerte Menorias  
-- Kobe Marco Gamus Olaguir  
-- Joanna Reyda D. Santos  
+<p align="center">
+  <img src="docs/images/methodology_pipeline.png" width="900">
+</p>
 
 ---
 
-## License
+<!-- ================= HARDWARE ================= -->
 
-This project is licensed under the **MIT License**.  
-See the [LICENSE](LICENSE) file for details.
+<h2 align="center">Hardware Prototype</h2>
+
+<p align="center">
+  <img src="docs/images/hardware_prototype.png" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/images/hardware_performance.png" width="800">
+</p>
 
 ---
 
-## Disclaimer
+<!-- ================= UX ================= -->
 
-CardioScope is a research and assistive tool.  
-It is **not a medical diagnostic device** and should not be used as a substitute for professional clinical judgment.
+<h2 align="center">User Experience</h2>
+
+<p align="center">
+  <img src="docs/images/beat_framework.png" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/images/mobile_ui.png" width="800">
+</p>
+
+<p align="center">
+  <em>Simple, guided workflow for screening and reporting.</em>
+</p>
+
+---
+
+<!-- ================= DEFENSE ================= -->
+
+<h2 align="center">Project Materials</h2>
+
+<p align="center">
+  <a href="docs/slides/Final%20Defense.pdf">Final Defense Slides (PDF)</a> ·
+  <a href="docs/slides/USTP-CardioScope.pdf">USTP CardioScope Slides (PDF)</a>
+</p>
+
+---
+
+<!-- ================= FOOTER ================= -->
+
+<p align="center">
+  <strong>University of Science and Technology of Southern Philippines</strong><br>
+  Research & Capstone Project · 2025
+</p>
+
+<p align="center">
+  <a href="LICENSE">MIT License</a> · <a href="CITATION.cff">Citation</a>
+</p>
