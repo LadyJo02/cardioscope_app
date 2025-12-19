@@ -1,11 +1,11 @@
 <!-- ================= HERO / LANDING ================= -->
 
 <p align="center">
-  <img src="docs/images/brochure_outside.png" width="1000">
+  <img src="docs/images/BROCHURE outside.png" width="1000">
 </p>
 
 <p align="center">
-  <img src="docs/images/brochure_inside.png" width="1000">
+  <img src="docs/images/BROCHURE inside.png" width="1000">
 </p>
 
 <p align="center">
