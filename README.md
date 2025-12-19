@@ -115,7 +115,7 @@
 <h2 align="center">Hardware Prototype</h2>
 
 <p align="center">
-  <img src="docs/images/hardware_prototype.png" width="800">
+  <img src="docs/images/hardware_prototype.gif" width="800">
 </p>
 
 <p align="center">
@@ -133,7 +133,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/mobile_ui.png" width="800">
+  <img src="docs/images/mobile_ui.gif" width="800">
 </p>
 
 <p align="center">
