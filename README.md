@@ -77,23 +77,23 @@
 ---
 <!-- ================= DATA ACCESS ================= -->
 
+<!-- ================= DATA ACCESS ================= -->
+
 <h2 align="center">Dataset Access</h2>
 
 <p align="center">
   Due to file size limits and data governance considerations,
-  the full CardioScope dataset is hosted externally.
+  the CardioScope dataset is hosted externally.
 </p>
 
 <p align="center">
-  <a href="https://drive.google.com/drive/folders/1w_TKrdESWz-XGh7LZr5CQdL1MFQ_aOaH?usp=sharing">
-    Access the CardioScope Dataset
-  </a>
+  <a href="DATASET.md"><strong>View Dataset Access & Reproducibility Details</strong></a>
 </p>
 
 <p align="center">
   <em>
-    The repository includes complete preprocessing, training,
-    and evaluation pipelines for reproducible experiments.
+    The repository provides complete preprocessing, training,
+    and evaluation pipelines to support reproducible research.
   </em>
 </p>
 
@@ -187,6 +187,7 @@ cardioscope_app/
 ├── .gitignore                  # Ignored files and directories
 ├── .metadata                   # Flutter project metadata
 ├── CITATION.cff                # Academic citation metadata
+├── DATASET.md                  # Dataset description + Google Drive link
 ├── LICENSE.md                  # MIT License
 └── README.md                   # Project homepage (this file)
 </pre>
