@@ -179,12 +179,13 @@
 
 <pre>
 cardioscope_app/
-├── ai_pipeline/                # AI research and model development
-│
 ├── app/                        # Flutter mobile application (production)
 │
 ├── docs/                       # Documentation and project media
 │
+├── .gitattributes              # Git LFS and file handling rules
+├── .gitignore                  # Ignored files and directories
+├── .metadata                   # Flutter project metadata
 ├── CITATION.cff                # Academic citation metadata
 ├── LICENSE.md                  # MIT License
 └── README.md                   # Project homepage (this file)
