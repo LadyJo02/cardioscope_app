@@ -75,7 +75,29 @@
 </p>
 
 ---
+<!-- ================= DATA ACCESS ================= -->
 
+<h2 align="center">Dataset Access</h2>
+
+<p align="center">
+  Due to file size limits and data governance considerations,
+  the full CardioScope dataset is hosted externally.
+</p>
+
+<p align="center">
+  <a href="https://drive.google.com/drive/folders/1w_TKrdESWz-XGh7LZr5CQdL1MFQ_aOaH?usp=sharing">
+    Access the CardioScope Dataset
+  </a>
+</p>
+
+<p align="center">
+  <em>
+    The repository includes complete preprocessing, training,
+    and evaluation pipelines for reproducible experiments.
+  </em>
+</p>
+
+---
 <!-- ================= AI ================= -->
 
 <h2 align="center">AI Engine</h2>
@@ -146,11 +168,36 @@
 
 <p align="center">
   <a href="docs/slides/Final%20Defense.pdf">Final Defense Slides (PDF)</a> ·
-  <a href="docs/slides/USTP-CardioScope.pdf">USTP CardioScope Slides (PDF)</a>
+  <a href="docs/slides/USTP-CardioScope.pdf">USTP CardioScope Slides (PDF)</a> ·
+  <a href="docs\CARDIOSCOPE - FINAL PAPER.pdf">CardioScope Final Paper (PDF)</a>
 </p>
 
 ---
+<!-- ================= REPOSITORY STRUCTURE ================= -->
 
+<h2 align="center">Repository Structure</h2>
+
+<pre>
+cardioscope_app/
+├── ai_pipeline/                # AI research and model development
+│
+├── app/                        # Flutter mobile application (production)
+│
+├── docs/                       # Documentation and project media
+│
+├── CITATION.cff                # Academic citation metadata
+├── LICENSE.md                  # MIT License
+└── README.md                   # Project homepage (this file)
+</pre>
+
+<p align="center">
+  <em>
+    The repository separates production code, AI research, and documentation
+    to ensure clarity, reproducibility, and ethical compliance.
+  </em>
+</p>
+
+---
 <!-- ================= FOOTER ================= -->
 
 <p align="center">
