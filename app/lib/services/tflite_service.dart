@@ -48,6 +48,9 @@ class TfliteService {
     } catch (e, st) {
       debugPrint("❌ Model load error: $e\n$st");
     }
+    if (!isLoaded) {
+    throw Exception("TFLite models failed to load");
+    }
     LatencyDebug.end("🧠 AI", "All models ready");
   }
     
