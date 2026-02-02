@@ -103,48 +103,103 @@ Color _signalColor = Colors.grey;
     }
   }
 
-  Future<void> _initAudioSession() async {
-    final session = await AudioSession.instance;
-    await session.configure(const AudioSessionConfiguration.speech());
-    _devicesSubscription = session.devicesStream.listen((devices) {
-      _checkConnectedDevices(devices.toList());
-    });
-    _checkConnectedDevices((await session.getDevices()).toList());
-  }
+Future<void> _initAudioSession() async {
+  final session = await AudioSession.instance;
 
-  void _checkConnectedDevices(List<AudioDevice> devices) {
-    final usbDevice = devices.firstWhere(
-      (d) => d.name.toLowerCase().contains('usb'),
-      orElse: () => AudioDevice(
-        id: '',
-        name: '',
-        type: AudioDeviceType.unknown,
-        isInput: false,
-        isOutput: false,
+  await session.configure(
+    const AudioSessionConfiguration(
+      avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+      avAudioSessionMode: AVAudioSessionMode.measurement,
+      androidAudioAttributes: AndroidAudioAttributes(
+        contentType: AndroidAudioContentType.speech,
+        usage: AndroidAudioUsage.voiceCommunication,
+      ),
+      androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+      androidWillPauseWhenDucked: false,
+    ),
+  );
+
+  await session.setActive(true);
+
+  _devicesSubscription = session.devicesStream.listen((devices) {
+    _checkConnectedDevices(devices.toList());
+  });
+
+  _checkConnectedDevices((await session.getDevices()).toList());
+}
+
+void _checkConnectedDevices(List<AudioDevice> devices) {
+  final usbDevice = devices.firstWhere(
+    (d) =>
+        d.isInput &&
+        (d.name.toLowerCase().contains('usb') ||
+            d.name.toLowerCase().contains('external') ||
+            d.name.toLowerCase().contains('headset')),
+    orElse: () => AudioDevice(
+      id: '',
+      name: '',
+      type: AudioDeviceType.unknown,
+      isInput: false,
+      isOutput: false,
+    ),
+  );
+
+  final changed = _isUsbMicConnected != usbDevice.id.isNotEmpty;
+
+  if (!mounted) return;
+  setState(() => _isUsbMicConnected = usbDevice.id.isNotEmpty);
+
+  if (changed) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _isUsbMicConnected
+              ? 'CardioScope receiver connected'
+              : 'CardioScope receiver disconnected',
+        ),
+        backgroundColor:
+            _isUsbMicConnected ? AppColors.success : AppColors.warning,
+        duration: const Duration(seconds: 2),
       ),
     );
-
-    final changed = _isUsbMicConnected != usbDevice.id.isNotEmpty;
-
-    if (mounted) {
-      setState(() => _isUsbMicConnected = usbDevice.id.isNotEmpty);
-
-      if (changed) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _isUsbMicConnected
-                  ? 'CardioScope receiver connected'
-                  : 'CardioScope receiver disconnected',
-            ),
-            backgroundColor:
-                _isUsbMicConnected ? AppColors.success : AppColors.warning,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    }
   }
+}
+
+Future<bool> _verifyUsbMicIsActuallyWorking() async {
+  final recorder = record_lib.AudioRecorder();
+
+  if (!await recorder.hasPermission()) return false;
+
+  final tempDir = await Directory.systemTemp.createTemp();
+  try {
+    final path = '${tempDir.path}/probe.wav';
+
+    await recorder.start(
+      const record_lib.RecordConfig(
+        encoder: record_lib.AudioEncoder.wav,
+        sampleRate: 4000,
+        numChannels: 1,
+      ),
+      path: path,
+    );
+
+    await Future.delayed(const Duration(milliseconds: 500));
+    final recordedPath = await recorder.stop();
+
+    if (recordedPath == null) return false;
+
+    final size = await File(recordedPath).length();
+    return size > 2000; // real signal
+  } catch (_) {
+    // if anything fails, treat as "not working"
+    return false;
+  } finally {
+    // always cleanup the temp folder
+    try {
+      await tempDir.delete(recursive: true);
+    } catch (_) {}
+  }
+}
 
   @override
   void dispose() {
@@ -213,6 +268,13 @@ Color _signalColor = Colors.grey;
       openAppSettings();
       return;
     }
+
+  
+  if (!await _verifyUsbMicIsActuallyWorking()) {
+    _toast("USB receiver detected but no audio input. Reconnect receiver.");
+    setState(() => _isProcessing = false);
+    return;
+  }
 
 // If already recording → user is trying to stop early
 if (_isRecording) {

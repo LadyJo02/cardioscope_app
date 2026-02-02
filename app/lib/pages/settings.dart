@@ -57,7 +57,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _checkConnectedDevices(List<AudioDevice> devices) {
     final usbDevice = devices.firstWhere(
-      (d) => d.name.toLowerCase().contains('usb'),
+      (d) => d.isInput && (
+          d.name.toLowerCase().contains('usb') ||
+          d.name.toLowerCase().contains('external') ||
+          d.name.toLowerCase().contains('headset')
+      ),
       orElse: () => AudioDevice(
         id: '',
         name: '',
